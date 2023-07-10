@@ -3,6 +3,7 @@
 
 #include "elfio/elfio.hpp"
 #include "quark.hh"
+#include "builder.hh"
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -28,9 +29,12 @@ int main(int argc, char** argv) {
 
     struct elf elf = quark_readelf(reader);
     for (auto& sec : elf.exsecs) {
-        if (sec->inst_front) {
-            sec->insert_after(sec->inst_front, &nop);
+        struct builder* b = new_builder(&elf, sec);
+        if (sec->inst_front && sec->inst_front->next) {
+            b->locate(sec->inst_front->next);
+            b->insert_rtcall_before("__quark_first_inst");
         }
+        free(b);
     }
     elf.encode("out.o");
 

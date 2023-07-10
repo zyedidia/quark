@@ -24,6 +24,15 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
     elf.symtab.symtab = symsec;
 
     for (size_t i = 0; i < n_sec; i++) {
+        ELFIO::section* ssec = reader.sections[i];
+        if (ssec->get_type() == SHT_STRTAB) {
+            elf.strsec = ssec;
+            break;
+        }
+    }
+    assert(elf.strsec);
+
+    for (size_t i = 0; i < n_sec; i++) {
         ELFIO::section* psec = reader.sections[i];
         if ((psec->get_flags() & SHF_EXECINSTR) != 0) {
             ELFIO::section* relasec = NULL;
@@ -39,7 +48,7 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
             assert(exsec);
             *exsec = (struct exsec){
                 .section = psec,
-                .rela = relasec,
+                .rela = NULL,
                 .index = i,
                 .inst_front = NULL,
                 .inst_back = NULL,
@@ -70,7 +79,10 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
             elf.exsecs.push_back(exsec);
 
             if (relasec != NULL) {
-                std::vector<struct reloc> relocs;
+                struct rela* relap = (struct rela*) calloc(1, sizeof(struct rela));
+                assert(relap);
+                relap->rela = relasec;
+
                 ELFIO::relocation_section_accessor rela(reader, relasec);
                 for (size_t i = 0; i < rela.get_entries_num(); i++) {
                     Elf64_Addr offset;
@@ -87,16 +99,14 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
                             };
                             assert(offset == inst->offset);
                             inst->has_reloc = true;
-                            relocs.push_back(reloc);
+                            relap->relocs.push_back(reloc);
                             break;
                         }
                         inst = inst->next;
                     }
                 }
-                elf.relas.push_back((struct rela){
-                    .rela = relasec,
-                    .relocs = relocs,
-                });
+                elf.relas.push_back(relap);
+                exsec->rela = relap;
             }
         }
     }
@@ -155,9 +165,9 @@ void elf::encode(const char* outname) {
         s->encode();
     }
     for (auto& r : this->relas) {
-        r.encode(this->reader);
+        r->encode(this->reader, this->strsec, this->symtab.symtab);
     }
-    this->symtab.encode(this->reader);
+    this->symtab.encode(this);
     reader.save(outname);
 }
 
@@ -211,20 +221,33 @@ void exsec::encode() {
     this->section->set_data((const char*) data, this->inst_size);
 }
 
-void rela::encode(ELFIO::elfio& reader) {
+void rela::encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab) {
     ELFIO::relocation_section_accessor rela(reader, this->rela);
+    ELFIO::string_section_accessor stra(strsec);
+    ELFIO::symbol_section_accessor syma(reader, symtab);
     for (size_t i = 0; i < this->relocs.size(); i++) {
-        ELFIO::Elf64_Addr offset;
-        ELFIO::Elf_Word symbol;
-        ELFIO::Elf_Word type;
-        ELFIO::Elf_Sxword addend;
-        rela.get_entry(i, offset, symbol, type, addend);
-        rela.set_entry(i, this->relocs[i].inst->offset, symbol, type, addend);
+        struct reloc& r = this->relocs[i];
+        if (r.new_reloc) {
+            if (r.str) {
+                ELFIO::Elf_Word str_index = stra.add_string(r.str);
+                ELFIO::Elf_Word sym_index = syma.add_symbol(str_index, r.value ? r.value->offset : 0, 0, r.info, 0, r.shndx);
+                rela.add_entry(r.inst->offset, sym_index, r.type, 0);
+            } else {
+                rela.add_entry(r.inst->offset, STN_UNDEF, r.type, 0);
+            }
+        } else {
+            ELFIO::Elf64_Addr offset;
+            ELFIO::Elf_Word symbol;
+            ELFIO::Elf_Word type;
+            ELFIO::Elf_Sxword addend;
+            rela.get_entry(i, offset, symbol, type, addend);
+            rela.set_entry(i, r.inst->offset, symbol, type, addend);
+        }
     }
 }
 
-void symtab::encode(ELFIO::elfio& reader) {
-    ELFIO::symbol_section_accessor syma(reader, this->symtab);
+void symtab::encode(struct elf* elf) {
+    ELFIO::symbol_section_accessor syma(elf->reader, this->symtab);
     for (size_t i = 0; i < this->syms.size(); i++) {
         if (this->syms[i].start == NULL) {
             continue;
@@ -243,4 +266,10 @@ void symtab::encode(ELFIO::elfio& reader) {
         }
         syma.set_symbol(this->syms[i].index, start, size);
     }
+    syma.arrange_local_symbols([&](ELFIO::Elf_Xword first, ELFIO::Elf_Xword second) {
+        for (auto& r : elf->relas) {
+            ELFIO::relocation_section_accessor access(elf->reader, r->rela);
+            access.swap_symbols(first, second);
+        }
+    });
 }

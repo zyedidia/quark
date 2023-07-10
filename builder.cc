@@ -1,5 +1,7 @@
 #include "builder.hh"
+#include "reloc.hh"
 
+#include <elf.h>
 #include <assert.h>
 
 struct builder* new_builder(struct elf* elf, struct exsec* s) {
@@ -56,7 +58,16 @@ struct inst* builder::insert_rtcall_before(const char* fn) {
         {0x0141, 2},     // addi sp, sp, 16
     };
 
-    // TODO:
+    struct reloc_info {
+        unsigned char type;
+        size_t idx;
+
+        const char* str;
+        ssize_t value_idx;
+        unsigned char info;
+        ELFIO::Elf_Half shndx;
+    };
+
     // insert R_RISCV_GOT_HI20 pointing at 'auipc a7' with symbol 'fn'
     // insert R_RISCV_PCREL_LO12_I pointing at 'ld a7' with symbol '.L0'
     // insert R_RISCV_RELAX pointing at 'ld a7'
@@ -66,9 +77,37 @@ struct inst* builder::insert_rtcall_before(const char* fn) {
     // insert symbol 'fn' (GLOBAL, UND)
     // insert symbol '__quark_wrapper' (GLOBAL, UND)
 
-    this->insert_before(new_inst(ops[0]));
+    struct reloc_info relocs[] = {
+        {R_RISCV_GOT_HI20, 3, fn, -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
+        {R_RISCV_PCREL_LO12_I, 4, ".L0", 3, ELF64_ST_INFO(STB_LOCAL, STT_NOTYPE), (ELFIO::Elf_Half) this->exsec->index},
+        {R_RISCV_RELAX, 4, NULL, -1, 0, 0},
+        {R_RISCV_CALL, 5, "__quark_wrapper", -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
+        {R_RISCV_RELAX, 5, NULL, -1, 0, 0},
+    };
+
+    std::vector<inst*> insts;
+
+    struct inst* inst = new_inst(ops[0]);
+    this->insert_before(inst);
+    insts.push_back(inst);
     for (size_t i = 1; i < sizeof(ops)/sizeof(struct inst_dat); i++) {
-        this->insert_after(new_inst(ops[i]));
+        inst = new_inst(ops[i]);
+        this->insert_after(inst);
+        insts.push_back(inst);
     }
+
+    for (size_t i = 0; i < sizeof(relocs)/sizeof(struct reloc_info); i++) {
+        struct reloc_info rinf = relocs[i];
+        this->exsec->rela->relocs.push_back((struct reloc){
+            .inst = insts[rinf.idx],
+            .new_reloc = true,
+            .type = rinf.type,
+            .str = rinf.str,
+            .value = rinf.value_idx != -1 ? insts[rinf.value_idx] : NULL,
+            .shndx = rinf.shndx,
+            .info = rinf.info,
+        });
+    }
+
     return this->cur;
 }

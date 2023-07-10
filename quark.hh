@@ -19,7 +19,7 @@ struct inst {
 
 struct exsec {
     ELFIO::section* section;
-    ELFIO::section* rela;
+    struct rela* rela;
     size_t index;
 
     struct inst* inst_front;
@@ -34,12 +34,21 @@ struct exsec {
 
 struct reloc {
     struct inst* inst;
+
+    bool new_reloc;
+    unsigned char type;
+
+    // has symbol if str is non-null (symbol name)
+    const char* str;
+    struct inst* value;
+    ELFIO::Elf_Half shndx;
+    unsigned char info;
 };
 
 struct rela {
     ELFIO::section* rela;
     std::vector<struct reloc> relocs;
-    void encode(ELFIO::elfio& reader);
+    void encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab);
 };
 
 struct sym {
@@ -52,13 +61,14 @@ struct sym {
 struct symtab {
     ELFIO::section* symtab;
     std::vector<struct sym> syms;
-    void encode(ELFIO::elfio& reader);
+    void encode(struct elf* elf);
 };
 
 struct elf {
     ELFIO::elfio& reader;
+    ELFIO::section* strsec;
     std::vector<struct exsec*> exsecs;
-    std::vector<struct rela> relas;
+    std::vector<struct rela*> relas;
     struct symtab symtab;
 
     void encode(const char* outname);

@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
         struct builder* b = new_builder(&elf, sec);
         if (sec->inst_front && sec->inst_front->next) {
             b->locate(sec->inst_front->next);
-            b->insert_rtcall_before("__quark_first_inst");
+            b->insert_rtcall_before("__quark_callback");
         }
         free(b);
     }

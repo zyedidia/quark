@@ -65,7 +65,7 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
                 inst_fetch((const uint8_t*) &data[n], &rvinst, &length);
                 assert(length);
 
-                struct inst* inst = (struct inst*) malloc(sizeof(struct inst));
+                struct inst* inst = (struct inst*) calloc(1, sizeof(struct inst));
                 assert(inst);
 
                 memcpy(&inst->data, &data[n], length);

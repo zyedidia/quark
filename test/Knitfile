@@ -1,4 +1,4 @@
 return b{
     $ test.o: test.c
-        riscv64-linux-gnu-gcc -c $input -o $output -O2
+        aarch64-linux-gnu-gcc -c $input -o $output -O2
 }

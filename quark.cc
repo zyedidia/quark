@@ -1,13 +1,15 @@
 #include <assert.h>
 
 #include "quark.hh"
-#include "riscv-disas/riscv-disas.h"
+#include "assemble.hh"
 
 #include <elf.h>
+#include <capstone/capstone.h>
 
-struct elf quark_readelf(ELFIO::elfio& reader) {
+struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
     struct elf elf = (struct elf){
         .reader = reader,
+        .handle = handle,
     };
 
     ELFIO::Elf_Half n_sec = reader.sections.size();
@@ -58,12 +60,15 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
             ELFIO::Elf_Xword size = psec->get_size();
             const char* data = psec->get_data();
 
+            std::vector<struct inst*> insts;
+
             size_t n = 0;
             while (n < size) {
-                rv_inst rvinst;
-                size_t length;
-                inst_fetch((const uint8_t*) &data[n], &rvinst, &length);
-                assert(length);
+                cs_insn* insn;
+                size_t addr = n;
+                size_t count = cs_disasm(elf.handle, (uint8_t*) &data[n], 4, addr, 0, &insn);
+                assert(count == 1);
+                size_t length = 4;
 
                 struct inst* inst = (struct inst*) calloc(1, sizeof(struct inst));
                 assert(inst);
@@ -71,9 +76,44 @@ struct elf quark_readelf(ELFIO::elfio& reader) {
                 memcpy(&inst->data, &data[n], length);
                 inst->size = length;
                 inst->offset = n;
+                inst->insn = insn[0];
+
+                cs_detail* detail = inst->insn.detail;
+                int64_t target = -1;
+                switch (inst->insn.id) {
+                case ARM64_INS_B:
+                    target = detail->arm64.operands[0].imm;
+                    break;
+                case ARM64_INS_BL:
+                    target = detail->arm64.operands[0].imm;
+                    break;
+                case ARM64_INS_CBZ:
+                    target = detail->arm64.operands[1].imm;
+                    break;
+                case ARM64_INS_CBNZ:
+                    target = detail->arm64.operands[1].imm;
+                    break;
+                case ARM64_INS_TBZ:
+                    target = detail->arm64.operands[2].imm;
+                    break;
+                case ARM64_INS_TBNZ:
+                    target = detail->arm64.operands[2].imm;
+                    break;
+                }
+
+                inst->_target_addr = target;
 
                 exsec->push_back(inst);
                 n += length;
+
+                insts.push_back(inst);
+            }
+
+            const size_t INST_SIZE = 4;
+            for (struct inst* inst : insts) {
+                if (inst->_target_addr != -1) {
+                    inst->target = insts[inst->_target_addr / INST_SIZE];
+                }
             }
 
             elf.exsecs.push_back(exsec);
@@ -213,8 +253,17 @@ void exsec::encode() {
     size_t n = 0;
     struct inst* inst = this->inst_front;
     while (inst) {
-        memcpy(&data[n], &inst->data, inst->size);
         inst->offset = n;
+        n += inst->size;
+        inst = inst->next;
+    }
+    n = 0;
+    inst = this->inst_front;
+    while (inst) {
+        if (inst->target != NULL) {
+            inst->data = reassemble(inst->insn, inst->data, inst->target->offset - inst->offset);
+        }
+        memcpy(&data[n], &inst->data, inst->size);
         n += inst->size;
         inst = inst->next;
     }

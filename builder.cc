@@ -1,8 +1,17 @@
 #include "builder.hh"
 #include "reloc.hh"
+#include "assemble.hh"
 
 #include <elf.h>
 #include <assert.h>
+
+struct inst* new_inst(struct inst_dat i) {
+    struct inst* alloc = (struct inst*) calloc(1, sizeof(struct inst));
+    assert(alloc);
+    alloc->data = i.data;
+    alloc->size = i.size;
+    return alloc;
+}
 
 struct builder* new_builder(struct elf* elf, struct exsec* s) {
     struct builder* b = (struct builder*) malloc(sizeof(struct builder));
@@ -31,35 +40,37 @@ struct inst* builder::insert_before(struct inst* i) {
     return this->cur;
 }
 
-struct inst_dat {
-    uint32_t data;
-    size_t size;
-};
+struct inst* builder::insert_call_before(const char* fn) {
+    struct inst* inst = this->insert_before(new_inst({arm64_bl(0), 4}));
 
-static struct inst* new_inst(struct inst_dat i) {
-    struct inst* alloc = (struct inst*) calloc(1, sizeof(struct inst));
-    assert(alloc);
-    alloc->data = i.data;
-    alloc->size = i.size;
-    return alloc;
+    // TODO: if exsec->rela does not exist, create a new rela section for this exsec
+
+    assert(this->exsec->rela);
+
+    this->exsec->rela->relocs.push_back((struct reloc){
+        .inst = inst,
+        .new_reloc = true,
+        .type = R_AARCH64_CALL26,
+        .str = fn,
+        .value = NULL,
+        .shndx = SHN_UNDEF,
+        .info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+    });
+
+    return this->cur;
 }
 
 struct inst* builder::insert_rtcall_before(const char* fn) {
     struct inst_dat ops[] = {
-        {0x1141, 2},     // addi sp, sp, -16
-        {0xe006, 2},     // sd ra, 0(sp)
-        {0xe446, 2},     // sd a7, 8(sp)
-        {0x00000897, 4}, // auipc a7, 0x0
-        {0x0008b883, 4}, // ld a7, 0(a7)
-        {0x00000097, 4}, // auipc ra, 0x0
-        {0x000080e7, 4}, // jalr ra
-        {0x6082, 2},     // ld ra, 0(sp)
-        {0x68a2, 2},     // ld a7, 8(sp)
-        {0x0141, 2},     // addi sp, sp, 16
+        {0xa8bf23fe, 4}, // stp x30, x8, [sp], -16
+        {0x90000008, 4}, // adrp x8, fn
+        {0xf9400108, 4}, // ldr x8, [x8]
+        {0x94000000, 4}, // bl __quark_rtcall
+        {0xa9c123fe, 4}, // ldp x30, x8, [sp, 16]!
     };
 
     struct reloc_info {
-        unsigned char type;
+        unsigned short type;
         size_t idx;
 
         const char* str;
@@ -68,21 +79,10 @@ struct inst* builder::insert_rtcall_before(const char* fn) {
         ELFIO::Elf_Half shndx;
     };
 
-    // insert R_RISCV_GOT_HI20 pointing at 'auipc a7' with symbol 'fn'
-    // insert R_RISCV_PCREL_LO12_I pointing at 'ld a7' with symbol '.L0'
-    // insert R_RISCV_RELAX pointing at 'ld a7'
-    // insert R_RISCV_CALL pointing at 'auipc ra' with symbol __quark_wrapper
-    // insert R_RISCV_RELAX pointing at 'auipc ra'
-    // insert symbol '.L0' pointing at 'auipc a7' (LOCAL, current section)
-    // insert symbol 'fn' (GLOBAL, UND)
-    // insert symbol '__quark_wrapper' (GLOBAL, UND)
-
     struct reloc_info relocs[] = {
-        {R_RISCV_GOT_HI20, 3, fn, -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
-        {R_RISCV_PCREL_LO12_I, 4, ".L0", 3, ELF64_ST_INFO(STB_LOCAL, STT_NOTYPE), (ELFIO::Elf_Half) this->exsec->index},
-        {R_RISCV_RELAX, 4, NULL, -1, 0, 0},
-        {R_RISCV_CALL, 5, "__quark_wrapper", -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
-        {R_RISCV_RELAX, 5, NULL, -1, 0, 0},
+        {R_AARCH64_ADR_GOT_PAGE, 1, fn, -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
+        {R_AARCH64_LD64_GOT_LO12_NC, 2, fn, -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
+        {R_AARCH64_CALL26, 3, "__quark_wrapper", -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
     };
 
     std::vector<inst*> insts;

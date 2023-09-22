@@ -1,39 +1,34 @@
 .section .text.quark.__quark_wrapper
 .globl __quark_wrapper
 __quark_wrapper:
-	addi sp, sp, -128
-	sd ra, 0(sp)
-	sd t0, 8(sp)
-	sd t1, 16(sp)
-	sd t2, 24(sp)
-	sd t3, 32(sp)
-	sd t4, 40(sp)
-	sd t5, 48(sp)
-	sd t6, 56(sp)
-	sd a0, 64(sp)
-	sd a1, 72(sp)
-	sd a2, 80(sp)
-	sd a3, 88(sp)
-	sd a4, 96(sp)
-	sd a5, 104(sp)
-	sd a6, 112(sp)
-	sd a7, 120(sp)
-	jalr a7
-	ld ra, 0(sp)
-	ld t0, 8(sp)
-	ld t1, 16(sp)
-	ld t2, 24(sp)
-	ld t3, 32(sp)
-	ld t4, 40(sp)
-	ld t5, 48(sp)
-	ld t6, 56(sp)
-	ld a0, 64(sp)
-	ld a1, 72(sp)
-	ld a2, 80(sp)
-	ld a3, 88(sp)
-	ld a4, 96(sp)
-	ld a5, 104(sp)
-	ld a6, 112(sp)
-	ld a7, 120(sp)
-	addi sp, sp, 128
+	sub sp, sp, #256
+	stp x0, x1,   [sp, #0+16*0]
+	stp x2, x3,   [sp, #0+16*1]
+	stp x4, x5,   [sp, #0+16*2]
+	stp x6, x7,   [sp, #0+16*3]
+	stp x8, x9,   [sp, #0+16*4]
+	stp x10, x11, [sp, #0+16*5]
+	stp x12, x13, [sp, #0+16*6]
+	stp x14, x15, [sp, #0+16*7]
+	stp x16, x17, [sp, #0+16*8]
+	stp x18, x19, [sp, #0+16*9]
+	stp x20, x21, [sp, #0+16*10]
+	stp x22, x23, [sp, #0+16*11]
+	stp x24, x25, [sp, #0+16*12]
+	stp x26, x27, [sp, #0+16*13]
+	stp x28, x29, [sp, #0+16*14]
+	stp x30, xzr, [sp, #0+16*15]
+	blr x8
+	ldp x0, x1,   [sp, #0+16*0]
+	ldp x2, x3,   [sp, #0+16*1]
+	ldp x4, x5,   [sp, #0+16*2]
+	ldp x6, x7,   [sp, #0+16*3]
+	ldp x8, x9,   [sp, #0+16*4]
+	ldp x10, x11, [sp, #0+16*5]
+	ldp x12, x13, [sp, #0+16*6]
+	ldp x14, x15, [sp, #0+16*7]
+	ldp x16, x17, [sp, #0+16*8]
+	ldr x18,      [sp, #0+16*9]
+	ldp x29, x30, [sp, #0+16*14+8]
+	add sp, sp, #256
 	ret

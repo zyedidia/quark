@@ -2,12 +2,17 @@
 
 #include <stdint.h>
 #include <vector>
+#include <capstone/capstone.h>
 
 #include "elfio/elfio.hpp"
 
 struct inst {
     uint32_t data;
+    cs_insn insn;
     size_t size;
+
+    int64_t _target_addr;
+    struct inst* target;
 
     bool has_reloc;
 
@@ -36,7 +41,7 @@ struct reloc {
     struct inst* inst;
 
     bool new_reloc;
-    unsigned char type;
+    unsigned short type;
 
     // has symbol if str is non-null (symbol name)
     const char* str;
@@ -70,8 +75,9 @@ struct elf {
     std::vector<struct exsec*> exsecs;
     std::vector<struct rela*> relas;
     struct symtab symtab;
+    csh handle;
 
     void encode(const char* outname);
 };
 
-struct elf quark_readelf(ELFIO::elfio& reader);
+struct elf quark_readelf(ELFIO::elfio& reader, csh handle);

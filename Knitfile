@@ -21,8 +21,8 @@ local prog := quark
 return b{
     $ build:VB: $prog
 
-    $ $prog: $obj riscv-disas/riscv-disas.o
-        $(conf.cxx) $cflags $input -o $output
+    $ $prog: $obj
+        $(conf.cxx) $cflags $input -o $output -lcapstone
     $ %.o:D[%.d]: %.cc
         $(conf.cxx) $cflags -MMD -c $input -o $output
     $ %.o:D[%.d]: %.c

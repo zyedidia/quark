@@ -1,0 +1,7 @@
+* rebound tables
+* automatically add rela section to text sections without one (if inserting
+  relocations) [x]
+* example tools
+* Lua API
+* support for parsing/instrumenting .a files
+* add quark_notouch symbol

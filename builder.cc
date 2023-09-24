@@ -24,6 +24,22 @@ struct builder* new_builder(struct elf* elf, struct exsec* s) {
     return b;
 }
 
+void builder::add_reloc(struct reloc reloc) {
+    if (!this->exsec->rela) {
+        ELFIO::section* sec = this->elf->reader.sections.add(this->exsec->section->get_name() + ".rela");
+        sec->set_type(SHT_RELA);
+        sec->set_info(this->exsec->section->get_index());
+        sec->set_flags(SHF_INFO_LINK);
+        sec->set_entry_size(this->elf->reader.get_default_entry_size(SHT_RELA));
+        sec->set_link(this->elf->symtab.symtab->get_index());
+        this->exsec->rela = (struct rela*) calloc(1, sizeof(struct rela));
+        assert(this->exsec->rela);
+        this->exsec->rela->rela = sec;
+    }
+    reloc.new_reloc = true;
+    this->exsec->rela->relocs.push_back(reloc);
+}
+
 void builder::locate(struct inst* i) {
     this->cur = i;
 }
@@ -43,11 +59,7 @@ struct inst* builder::insert_before(struct inst* i) {
 struct inst* builder::insert_call_before(const char* fn) {
     struct inst* inst = this->insert_before(new_inst({arm64_bl(0), 4}));
 
-    // TODO: if exsec->rela does not exist, create a new rela section for this exsec
-
-    assert(this->exsec->rela);
-
-    this->exsec->rela->relocs.push_back((struct reloc){
+    this->add_reloc((struct reloc){
         .inst = inst,
         .new_reloc = true,
         .type = R_AARCH64_CALL26,
@@ -62,11 +74,11 @@ struct inst* builder::insert_call_before(const char* fn) {
 
 struct inst* builder::insert_rtcall_before(const char* fn) {
     struct inst_dat ops[] = {
-        {0xa8bf23fe, 4}, // stp x30, x8, [sp], -16
+        {0xa9bf23fe, 4}, // stp x30, x8, [sp, -16]!
         {0x90000008, 4}, // adrp x8, fn
         {0xf9400108, 4}, // ldr x8, [x8]
         {0x94000000, 4}, // bl __quark_rtcall
-        {0xa9c123fe, 4}, // ldp x30, x8, [sp, 16]!
+        {0xa8c123fe, 4}, // ldp x30, x8, [sp], 16
     };
 
     struct reloc_info {
@@ -98,9 +110,8 @@ struct inst* builder::insert_rtcall_before(const char* fn) {
 
     for (size_t i = 0; i < sizeof(relocs)/sizeof(struct reloc_info); i++) {
         struct reloc_info rinf = relocs[i];
-        this->exsec->rela->relocs.push_back((struct reloc){
+        this->add_reloc((struct reloc){
             .inst = insts[rinf.idx],
-            .new_reloc = true,
             .type = rinf.type,
             .str = rinf.str,
             .value = rinf.value_idx != -1 ? insts[rinf.value_idx] : NULL,

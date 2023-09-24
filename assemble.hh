@@ -6,25 +6,33 @@
 #include "bits.hh"
 
 static inline uint32_t reassemble(cs_insn insn, uint32_t data, int64_t imm) {
+    imm = imm >> 2;
     switch (insn.id) {
     case ARM64_INS_B:
         if (insn.detail->arm64.cc != ARM64_CC_INVALID) {
             // b.cond
-            return bits_set(data, 24, 5, imm >> 2);
+            imm = imm & bits_mask(23 - 5 + 1);
+            return bits_set(data, 23, 5, imm);
         } else {
             // b.uncond
-            return bits_set(data, 25, 0, imm >> 2);
+            imm = imm & bits_mask(25 - 0 + 1);
+            return bits_set(data, 25, 0, imm);
         }
     case ARM64_INS_BL:
-        return bits_set(data, 25, 0, imm >> 2);
+        imm = imm & bits_mask(25 - 0 + 1);
+        return bits_set(data, 25, 0, imm);
     case ARM64_INS_CBZ:
-        return bits_set(data, 24, 5, imm >> 2);
+        imm = imm & bits_mask(23 - 5 + 1);
+        return bits_set(data, 23, 5, imm);
     case ARM64_INS_CBNZ:
-        return bits_set(data, 24, 5, imm >> 2);
+        imm = imm & bits_mask(23 - 5 + 1);
+        return bits_set(data, 23, 5, imm);
     case ARM64_INS_TBZ:
-        return bits_set(data, 19, 5, imm >> 2);
+        imm = imm & bits_mask(18 - 5 + 1);
+        return bits_set(data, 18, 5, imm);
     case ARM64_INS_TBNZ:
-        return bits_set(data, 19, 5, imm >> 2);
+        imm = imm & bits_mask(18 - 5 + 1);
+        return bits_set(data, 18, 5, imm);
     default:
         assert(0);
         return 0;

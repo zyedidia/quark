@@ -10,6 +10,7 @@ struct builder {
     struct inst* cur;
 
     void locate(struct inst* i);
+    void add_reloc(struct reloc reloc);
     struct inst* insert_after(struct inst* i);
     struct inst* insert_before(struct inst* i);
     struct inst* insert_rtcall_before(const char* fn);

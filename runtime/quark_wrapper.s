@@ -1,3 +1,5 @@
+.globl quark_notouch
+
 .section .text.quark.__quark_wrapper
 .globl __quark_wrapper
 __quark_wrapper:

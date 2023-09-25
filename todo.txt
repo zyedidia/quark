@@ -4,4 +4,4 @@
 * example tools
 * Lua API
 * support for parsing/instrumenting .a files
-* add quark_notouch symbol
+* add quark_notouch symbol [x]

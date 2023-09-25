@@ -33,6 +33,17 @@ int main(int argc, char** argv) {
     const uint64_t INST_RET = 0xd65f03c0;
 
     struct elf elf = quark_readelf(reader, handle);
+
+    ELFIO::Elf64_Addr _value;
+    ELFIO::Elf_Xword _size;
+    unsigned char _bind, _type, _other;
+    ELFIO::Elf_Half _section_index;
+    ELFIO::symbol_section_accessor syma(elf.reader, elf.symtab.symtab);
+    if (syma.get_symbol("quark_notouch", _value, _size, _bind, _type, _section_index, _other)) {
+        printf("found quark_notouch\n");
+        goto done;
+    }
+
     for (auto& sec : elf.exsecs) {
         struct builder* b = new_builder(&elf, sec);
         struct inst* inst = sec->inst_front;
@@ -49,6 +60,8 @@ int main(int argc, char** argv) {
         }
         free(b);
     }
+
+done:
     elf.encode(argv[2]);
 
     cs_close(&handle);

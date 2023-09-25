@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+char quark_notouch[1] __attribute__((weak));
+
 extern int end;
 
 static int returns;

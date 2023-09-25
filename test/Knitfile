@@ -7,4 +7,6 @@ return b{
         aarch64-linux-gnu-gcc -c $input -o $output -O2
     $ %.quark.o: %.o
         ../quark $input $output
+    $ ../runtime/quark_wrapper.o: ../runtime/quark_wrapper.s
+        aarch64-linux-gnu-as $input -o $output
 }

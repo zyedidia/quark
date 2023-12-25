@@ -35,6 +35,7 @@ void builder::add_reloc(struct reloc reloc) {
         this->exsec->rela = (struct rela*) calloc(1, sizeof(struct rela));
         assert(this->exsec->rela);
         this->exsec->rela->rela = sec;
+        this->elf->relas.push_back(this->exsec->rela);
     }
     reloc.new_reloc = true;
     this->exsec->rela->relocs.push_back(reloc);

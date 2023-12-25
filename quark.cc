@@ -73,6 +73,8 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 struct inst* inst = (struct inst*) calloc(1, sizeof(struct inst));
                 assert(inst);
 
+                inst->original = true;
+
                 memcpy(&inst->data, &data[n], length);
                 inst->size = length;
                 inst->offset = n;
@@ -99,6 +101,10 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 case ARM64_INS_TBNZ:
                     target = detail->arm64.operands[2].imm;
                     break;
+                case ARM64_INS_BR:
+                case ARM64_INS_BLR:
+                    exsec->needs_rebound = true;
+                    break;
                 }
 
                 inst->_target_addr = target;
@@ -114,6 +120,10 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 if (inst->_target_addr != -1) {
                     inst->target = insts[inst->_target_addr / INST_SIZE];
                 }
+            }
+
+            if (exsec->needs_rebound) {
+                exsec->orig_size = exsec->inst_size;
             }
 
             elf.exsecs.push_back(exsec);
@@ -247,17 +257,29 @@ void exsec::push_back(struct inst* n) {
 }
 
 void exsec::encode() {
-    char* data = (char*) malloc(this->inst_size);
+    char* data = (char*) calloc(this->inst_size + this->orig_size, 1);
     assert(data);
 
     size_t n = 0;
+    size_t r = 0;
     struct inst* inst = this->inst_front;
     while (inst) {
-        inst->offset = n;
+        inst->offset = n + orig_size;
+        inst->rebound_offset = r;
+
+        if (needs_rebound) {
+            if (inst->original) {
+                uint32_t bl = arm64_bl((n - r + orig_size) / 4);
+                memcpy(&data[r], &bl, inst->size);
+                r += inst->size;
+            }
+        }
+
         n += inst->size;
         inst = inst->next;
     }
-    n = 0;
+
+    n = r;
     inst = this->inst_front;
     while (inst) {
         if (inst->target != NULL) {
@@ -267,7 +289,7 @@ void exsec::encode() {
         n += inst->size;
         inst = inst->next;
     }
-    this->section->set_data((const char*) data, this->inst_size);
+    this->section->set_data((const char*) data, this->inst_size + this->orig_size);
 }
 
 void rela::encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab) {
@@ -307,11 +329,11 @@ void symtab::encode(struct elf* elf) {
         unsigned char bind, type, other;
         ELFIO::Elf_Half section_index;
         syma.get_symbol(this->syms[i].index, name, value, size, bind, type, section_index, other);
-        size_t start = this->syms[i].start->offset;
+        size_t start = this->syms[i].start->rebound_offset;
         if (!this->syms[i].end) {
             size = this->syms[i].exsec->inst_size - start;
         } else {
-            size = this->syms[i].end->offset - start;
+            size = this->syms[i].end->rebound_offset - start;
         }
         syma.set_symbol(this->syms[i].index, start, size);
     }

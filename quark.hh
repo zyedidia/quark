@@ -15,8 +15,10 @@ struct inst {
     struct inst* target;
 
     bool has_reloc;
+    bool original;
 
     size_t offset;
+    size_t rebound_offset;
 
     struct inst* next;
     struct inst* prev;
@@ -30,6 +32,9 @@ struct exsec {
     struct inst* inst_front;
     struct inst* inst_back;
     size_t inst_size;
+    size_t orig_size;
+
+    bool needs_rebound;
 
     void push_back(struct inst* inst);
     void insert_after(struct inst* n, struct inst* new_inst);

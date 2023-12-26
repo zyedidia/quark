@@ -50,11 +50,11 @@ int main(int argc, char** argv) {
         while (inst) {
             if (inst->data == INST_RET) {
                 b->locate(inst);
-                b->insert_rtcall_before("on_return");
-                // b->insert_before(new_inst((struct inst_dat){
-                //     .data = 0xd503201f,
-                //     .size = 4,
-                // }));
+                // b->insert_rtcall_before("on_return");
+                b->insert_before(new_inst((struct inst_dat){
+                    .data = 0xd503201f,
+                    .size = 4,
+                }));
             }
             inst = inst->next;
         }

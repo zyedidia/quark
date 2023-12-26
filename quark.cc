@@ -105,7 +105,6 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                     target = detail->arm64.operands[2].imm;
                     break;
                 case ARM64_INS_BR:
-                case ARM64_INS_BLR:
                     exsec->needs_rebound = true;
                     break;
                 }

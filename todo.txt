@@ -9,3 +9,6 @@
 * Lua API
 * support for parsing/instrumenting .a files
 * add quark_notouch symbol [x]
+
+* if you try to take the address of a section's text with adr/adrp, then that
+  section gets a rebound table, and the adr/adrp is rewritten to target it

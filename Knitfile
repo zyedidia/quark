@@ -16,7 +16,7 @@ end
 
 local src = knit.glob("*.cc")
 local obj = knit.extrepl(src, ".cc", ".o")
-local prog := quark
+local prog := quark-module
 
 return b{
     $ build:VB: $prog

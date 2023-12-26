@@ -67,7 +67,10 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 cs_insn* insn;
                 size_t addr = n;
                 size_t count = cs_disasm(elf.handle, (uint8_t*) &data[n], 4, addr, 0, &insn);
-                assert(count == 1);
+                if (count != 1) {
+                    fprintf(stderr, "failed to disassemble");
+                    exit(1);
+                }
                 size_t length = 4;
 
                 struct inst* inst = (struct inst*) calloc(1, sizeof(struct inst));

@@ -63,6 +63,7 @@ type Object struct {
 
 func main() {
 	module := flag.String("module", "quark-module", "module")
+	output := flag.String("o", "quark.a", "output library")
 
 	flag.Parse()
 
@@ -132,5 +133,7 @@ func main() {
 	}
 	w.Close()
 
-	os.WriteFile("out.a", buf.Bytes(), 0666)
+	os.WriteFile(*output, buf.Bytes(), 0666)
+
+	rmtemps()
 }

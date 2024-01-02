@@ -3,7 +3,7 @@ local knit = require("knit")
 local conf = {
     cc = cli.cc or "gcc",
     cxx = cli.cxx or "g++",
-    debug = tobool(cli.debug) or true,
+    debug = sel(cli.debug == nil, true, tobool(cli.debug)),
 }
  
 local cflags := -Wall -I.

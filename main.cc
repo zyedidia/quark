@@ -38,10 +38,13 @@ int main(int argc, char** argv) {
     ELFIO::Elf_Xword _size;
     unsigned char _bind, _type, _other;
     ELFIO::Elf_Half _section_index;
-    ELFIO::symbol_section_accessor syma(elf.reader, elf.symtab.symtab);
-    if (syma.get_symbol("quark_notouch", _value, _size, _bind, _type, _section_index, _other)) {
-        printf("found quark_notouch\n");
-        goto done;
+
+    if (elf.symtab.symtab) {
+        ELFIO::symbol_section_accessor syma(elf.reader, elf.symtab.symtab);
+        if (syma.get_symbol("quark_notouch", _value, _size, _bind, _type, _section_index, _other)) {
+            printf("found quark_notouch\n");
+            goto done;
+        }
     }
 
     for (auto& sec : elf.exsecs) {

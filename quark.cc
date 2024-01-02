@@ -22,7 +22,7 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
             break;
         }
     }
-    assert(symsec);
+    // assert(symsec);
     elf.symtab.symtab = symsec;
 
     for (size_t i = 0; i < n_sec; i++) {
@@ -32,7 +32,7 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
             break;
         }
     }
-    assert(elf.strsec);
+    // assert(elf.strsec);
 
     for (size_t i = 0; i < n_sec; i++) {
         ELFIO::section* psec = reader.sections[i];
@@ -64,12 +64,11 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
 
             size_t n = 0;
             while (n < size) {
-                cs_insn* insn;
+                cs_insn* insn = NULL;
                 size_t addr = n;
                 size_t count = cs_disasm(elf.handle, (uint8_t*) &data[n], 4, addr, 0, &insn);
                 if (count != 1) {
-                    fprintf(stderr, "failed to disassemble");
-                    exit(1);
+                    fprintf(stderr, "failed to disassemble %x at %lx", *((uint32_t*) &data[n]), addr);
                 }
                 size_t length = 4;
 
@@ -81,32 +80,36 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 memcpy(&inst->data, &data[n], length);
                 inst->size = length;
                 inst->offset = n;
-                inst->insn = insn[0];
 
-                cs_detail* detail = inst->insn.detail;
                 int64_t target = -1;
-                switch (inst->insn.id) {
-                case ARM64_INS_B:
-                    target = detail->arm64.operands[0].imm;
-                    break;
-                case ARM64_INS_BL:
-                    target = detail->arm64.operands[0].imm;
-                    break;
-                case ARM64_INS_CBZ:
-                    target = detail->arm64.operands[1].imm;
-                    break;
-                case ARM64_INS_CBNZ:
-                    target = detail->arm64.operands[1].imm;
-                    break;
-                case ARM64_INS_TBZ:
-                    target = detail->arm64.operands[2].imm;
-                    break;
-                case ARM64_INS_TBNZ:
-                    target = detail->arm64.operands[2].imm;
-                    break;
-                case ARM64_INS_BR:
-                    exsec->needs_rebound = true;
-                    break;
+
+                if (insn != NULL) {
+                    inst->insn = insn[0];
+
+                    cs_detail* detail = inst->insn.detail;
+                    switch (inst->insn.id) {
+                    case ARM64_INS_B:
+                        target = detail->arm64.operands[0].imm;
+                        break;
+                    case ARM64_INS_BL:
+                        target = detail->arm64.operands[0].imm;
+                        break;
+                    case ARM64_INS_CBZ:
+                        target = detail->arm64.operands[1].imm;
+                        break;
+                    case ARM64_INS_CBNZ:
+                        target = detail->arm64.operands[1].imm;
+                        break;
+                    case ARM64_INS_TBZ:
+                        target = detail->arm64.operands[2].imm;
+                        break;
+                    case ARM64_INS_TBNZ:
+                        target = detail->arm64.operands[2].imm;
+                        break;
+                    case ARM64_INS_BR:
+                        exsec->needs_rebound = true;
+                        break;
+                    }
                 }
 
                 inst->_target_addr = target;
@@ -162,6 +165,9 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
             }
         }
     }
+
+    if (!symsec)
+        return elf;
 
     ELFIO::symbol_section_accessor syma(reader, symsec);
     for (size_t i = 0; i < syma.get_symbols_num(); i++) {
@@ -320,6 +326,9 @@ void rela::encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* 
 }
 
 void symtab::encode(struct elf* elf) {
+    if (!this->symtab)
+        return;
+
     ELFIO::symbol_section_accessor syma(elf->reader, this->symtab);
     for (size_t i = 0; i < this->syms.size(); i++) {
         if (this->syms[i].start == NULL) {

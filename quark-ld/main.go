@@ -14,8 +14,7 @@ func run(cmd string, args ...string) error {
 	fmt.Println(c)
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	return nil
-	// return c.Run()
+	return c.Run()
 }
 
 func quarkify(path, module string) string {
@@ -29,7 +28,6 @@ func quarkify(path, module string) string {
 
 func findlib(name string, search []string) (string, bool) {
 	for _, dir := range search {
-		// fmt.Println("searching for", name, "in", dir)
 		ents, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -68,6 +66,8 @@ func main() {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case strings.HasPrefix(arg, "--quark-module="):
+			continue
 		case strings.HasSuffix(arg, ".a"), strings.HasSuffix(arg, ".o"):
 			ldargs = append(ldargs, quarkify(arg, module))
 		case strings.HasPrefix(arg, "-l"):

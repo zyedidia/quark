@@ -12,3 +12,9 @@
 
 * if you try to take the address of a section's text with adr/adrp, then that
   section gets a rebound table, and the adr/adrp is rewritten to target it
+
+* fix rebound tables
+* use a cache for the linker wrapper
+* test binary with linker wrapper
+* fix eh_frame relocations
+* fix debug_frame relocations

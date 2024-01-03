@@ -192,12 +192,12 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
             assert(inst);
             struct inst* start = NULL;
             struct inst* end = NULL;
+            size_t endidx = value + size;
             while (inst) {
                 if (value >= inst->offset && value < inst->offset + inst->size) {
                     start = inst;
                     assert(value == inst->offset);
                 }
-                size_t endidx = value + size;
                 if (endidx >= inst->offset && endidx < inst->offset + inst->size) {
                     end = inst;
                     assert(endidx == inst->offset);
@@ -211,6 +211,11 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 .end = end,
                 .index = i,
                 .exsec = exsec,
+            });
+        } else {
+            elf.symtab.syms.push_back((struct sym){
+                .start = NULL,
+                .index = i,
             });
         }
     }
@@ -340,11 +345,11 @@ void symtab::encode(struct elf* elf) {
         unsigned char bind, type, other;
         ELFIO::Elf_Half section_index;
         syma.get_symbol(this->syms[i].index, name, value, size, bind, type, section_index, other);
-        size_t start = this->syms[i].start->rebound_offset;
+        size_t start = this->syms[i].start->offset;
         if (!this->syms[i].end) {
             size = this->syms[i].exsec->inst_size - start;
         } else {
-            size = this->syms[i].end->rebound_offset - start;
+            size = this->syms[i].end->offset - start;
         }
         syma.set_symbol(this->syms[i].index, start, size);
     }

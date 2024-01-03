@@ -13,6 +13,13 @@ import (
 	"github.com/erikgeiser/ar"
 )
 
+func runcmd(c string, args ...string) error {
+	cmd := exec.Command(c, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func run(module, in, out string) error {
 	buf := &bytes.Buffer{}
 	cmd := exec.Command(module, in, out)
@@ -105,6 +112,19 @@ func main() {
 		f.Close()
 	}
 
+	if len(objs) == 1 && strings.HasSuffix(*output, ".o") {
+		f := temp(objs[0].name)
+		os.WriteFile(f, objs[0].data, 0666)
+		out, err := quark(*module, f)
+		if err != nil {
+			fatal(err)
+		}
+		os.Rename(out, *output)
+
+		rmtemps()
+		return
+	}
+
 	buf := &bytes.Buffer{}
 	w := ar.NewWriter(buf)
 
@@ -134,6 +154,7 @@ func main() {
 	w.Close()
 
 	os.WriteFile(*output, buf.Bytes(), 0666)
+	runcmd("ranlib", *output)
 
 	rmtemps()
 }

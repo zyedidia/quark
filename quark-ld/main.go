@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/adrg/xdg"
 )
 
 func run(cmd string, args ...string) error {
@@ -15,15 +17,6 @@ func run(cmd string, args ...string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()
-}
-
-func quarkify(path, module string) string {
-	name := filepath.Base(path)
-
-	target := filepath.Join(os.TempDir(), name)
-	run("quark", "-module", module, "-o", target, path)
-
-	return target
 }
 
 func findlib(name string, search []string) (string, bool) {
@@ -43,6 +36,12 @@ func findlib(name string, search []string) (string, bool) {
 
 func main() {
 	args := os.Args[1:]
+
+	cache, err := LoadCache(filepath.Join(xdg.CacheHome, "quark", "objcache"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cache.Save()
 
 	var ldargs []string
 	var search []string
@@ -69,12 +68,20 @@ func main() {
 		case strings.HasPrefix(arg, "--quark-module="):
 			continue
 		case strings.HasSuffix(arg, ".a"), strings.HasSuffix(arg, ".o"):
-			ldargs = append(ldargs, quarkify(arg, module))
+			f, err := cache.Quarkify(arg, module)
+			if err != nil {
+				log.Fatal(err)
+			}
+			ldargs = append(ldargs, f)
 		case strings.HasPrefix(arg, "-l"):
 			name := "lib" + arg[len("-l"):] + ".a"
 			lib, ok := findlib(name, search)
 			if ok {
-				ldargs = append(ldargs, quarkify(lib, module))
+				f, err := cache.Quarkify(lib, module)
+				if err != nil {
+					log.Fatal(err)
+				}
+				ldargs = append(ldargs, f)
 			}
 		default:
 			ldargs = append(ldargs, arg)

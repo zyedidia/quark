@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer cache.Save()
+	fmt.Println("loaded cache", cache.file)
 
 	var ldargs []string
 	var search []string
@@ -89,4 +89,9 @@ func main() {
 	}
 
 	run("ld", ldargs...)
+
+	err = cache.Save()
+	if err != nil {
+		log.Fatal(err)
+	}
 }

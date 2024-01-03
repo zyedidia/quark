@@ -114,6 +114,7 @@ func (c *Cache) Quarkify(path, module string) (string, error) {
 }
 
 func (c *Cache) Save() error {
+	os.MkdirAll(filepath.Dir(c.file), os.ModePerm)
 	f, err := os.Create(c.file)
 	if err != nil {
 		return err

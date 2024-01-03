@@ -114,14 +114,21 @@ func main() {
 
 	if len(objs) == 1 && strings.HasSuffix(*output, ".o") {
 		f := temp(objs[0].name)
-		os.WriteFile(f, objs[0].data, 0666)
+		err := os.WriteFile(f, objs[0].data, 0666)
+		if err != nil {
+			fatal(err)
+		}
 		out, err := quark(*module, f)
 		if err != nil {
 			fatal(err)
 		}
-		os.Rename(out, *output)
+		fmt.Println("rename", out, *output)
+		err = os.Rename(out, *output)
+		if err != nil {
+			fatal(err)
+		}
 
-		rmtemps()
+		// rmtemps()
 		return
 	}
 

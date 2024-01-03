@@ -67,20 +67,20 @@ func (c *Cache) Lookup(file, module string) ([]byte, bool) {
 }
 
 func (c *Cache) Insert(file, module string, data []byte) error {
-	data, err := os.ReadFile(file)
+	input, err := os.ReadFile(file)
 	if err != nil {
 		return err
 	}
-	hash := fnv1a.HashBytes64(data)
+	hash := fnv1a.HashBytes64(input)
 	moduleData, err := os.ReadFile(module)
 	if err != nil {
 		return err
 	}
-	dataHash := sha256.Sum256(data)
+	inputHash := sha256.Sum256(input)
 	moduleHash := sha256.Sum256(moduleData)
 	c.Entries[hash] = append(c.Entries[hash], Entry{
 		Module: moduleHash,
-		Input:  dataHash,
+		Input:  inputHash,
 		Data:   data,
 	})
 	return nil

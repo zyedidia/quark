@@ -88,7 +88,10 @@ func main() {
 		}
 	}
 
-	run("ld", ldargs...)
+	err = run("ld", ldargs...)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	err = cache.Save()
 	if err != nil {

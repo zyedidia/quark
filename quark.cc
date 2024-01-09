@@ -76,7 +76,7 @@ void qk_elf::load_relocs() {
 
             struct qk_reloc reloc;
 
-            auto sym = symtab.get_symbol(symbol);
+            auto sym = symtab.get_code_symbol(symbol);
             if (sym.has_value()) {
                 // relocation is in a code section
                 reloc.kind = QK_RELOC_VALUE;
@@ -87,6 +87,7 @@ void qk_elf::load_relocs() {
                     inst = inst->next;
                 }
                 reloc.r.value = (struct qk_reloc_value){
+                    .sym_start = sym.value().start,
                     .value = inst,
                 };
                 if (code) {
@@ -301,21 +302,25 @@ void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symt
     ELFIO::symbol_section_accessor syma(reader, symtab);
     for (size_t i = 0; i < relocs.size(); i++) {
         struct qk_reloc& reloc = relocs[i];
-        switch (reloc.kind) {
-        case QK_RELOC_OTHER:
-            break;
-        case QK_RELOC_VALUE:
-            // TODO: encode qk_reloc_value
-            break;
-        case QK_RELOC_CODE:
+        if (reloc.kind == QK_RELOC_VALUE) {
+            auto& r = reloc.r.value;
+            ELFIO::Elf64_Addr offset;
+            ELFIO::Elf_Word symbol;
+            ELFIO::Elf_Word type;
+            ELFIO::Elf_Sxword addend;
+            relaa.get_entry(i, offset, symbol, type, addend);
+            if (r.inst) {
+                offset = r.inst->offset;
+            }
+            relaa.set_entry(i, offset, symbol, type, r.value->offset - r.sym_start->offset);
+        } else if (reloc.kind == QK_RELOC_CODE) {
             ELFIO::Elf64_Addr offset;
             ELFIO::Elf_Word symbol;
             ELFIO::Elf_Word type;
             ELFIO::Elf_Sxword addend;
             relaa.get_entry(i, offset, symbol, type, addend);
             relaa.set_entry(i, reloc.r.code.inst->offset, symbol, type, addend);
-            break;
-        case QK_RELOC_NEW:
+        } else if (reloc.kind == QK_RELOC_NEW) {
             auto& r = reloc.r.new_;
             if (r.str) {
                 ELFIO::Elf_Word str_index = stra.add_string(r.str);
@@ -324,7 +329,6 @@ void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symt
             } else {
                 relaa.add_entry(r.inst->offset, STN_UNDEF, r.type, 0);
             }
-            break;
         }
     }
 }
@@ -395,9 +399,9 @@ void qk_code::insert_before(struct qk_inst* n, struct qk_inst* inst) {
     inst_size += inst->size;
 }
 
-std::optional<struct qk_sym> qk_symtab::get_symbol(size_t index) {
+std::optional<struct qk_sym> qk_symtab::get_code_symbol(size_t index) {
     for (auto& sym : syms) {
-        if (sym.index == index) {
+        if (sym.index == index && sym.code) {
             return sym;
         }
     }

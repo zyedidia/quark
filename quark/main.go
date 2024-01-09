@@ -15,6 +15,7 @@ import (
 
 func runcmd(c string, args ...string) error {
 	cmd := exec.Command(c, args...)
+	fmt.Println(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -132,35 +133,27 @@ func main() {
 		return
 	}
 
-	buf := &bytes.Buffer{}
-	w := ar.NewWriter(buf)
-
+	var qobjs []string
 	for _, obj := range objs {
 		if obj.name == "" {
 			continue
 		}
 
 		f := temp(obj.name)
-		os.WriteFile(f, obj.data, 0666)
+		err := os.WriteFile(f, obj.data, 0666)
+		if err != nil {
+			fatal(err)
+		}
 		out, err := quark(*module, f)
 		if err != nil {
 			fatal(err)
 		}
-		data, err := os.ReadFile(out)
-		if err != nil {
-			fatal(err)
-		}
-		hdr, err := ar.NewHeaderFromFile(out)
-		if err != nil {
-			fatal(err)
-		}
-		hdr.Name = obj.name
-		w.WriteHeader(hdr)
-		w.Write(data)
+		qobjs = append(qobjs, out)
 	}
-	w.Close()
 
-	os.WriteFile(*output, buf.Bytes(), 0666)
+	ar := append([]string{"rcs", *output}, qobjs...)
+
+	runcmd("ar", ar...)
 	runcmd("ranlib", *output)
 
 	rmtemps()

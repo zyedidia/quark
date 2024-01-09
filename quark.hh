@@ -51,6 +51,7 @@ struct qk_reloc_code {
 
 struct qk_reloc_value {
     struct qk_inst* inst; // may be null if not a code offset
+    struct qk_inst* sym_start;
     struct qk_inst* value;
 };
 
@@ -109,7 +110,7 @@ struct qk_symtab {
     std::vector<struct qk_sym> syms;
 
     void encode(struct qk_elf* elf);
-    std::optional<struct qk_sym> get_symbol(size_t index);
+    std::optional<struct qk_sym> get_code_symbol(size_t index);
 };
 
 struct qk_elf {

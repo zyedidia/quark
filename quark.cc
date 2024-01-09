@@ -1,78 +1,137 @@
 #include <assert.h>
 
 #include "quark.hh"
-#include "assemble.hh"
+#include "arm64.hh"
 
-#include <elf.h>
-#include <capstone/capstone.h>
+using namespace ELFIO;
 
-struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
-    struct elf elf = (struct elf){
+static section* find_section(elfio& reader, unsigned type) {
+    for (size_t i = 0; i < reader.sections.size(); i++) {
+        section* sec = reader.sections[i];
+        if (sec->get_type() == type) {
+            return sec;
+        }
+    }
+    return NULL;
+}
+
+struct qk_elf qk_readelf(elfio& reader, csh handle) {
+    struct qk_elf elf = (struct qk_elf){
         .reader = reader,
-        .handle = handle,
+        .cs_handle = handle,
     };
+    elf.symtab.section = find_section(reader, SHT_SYMTAB);
+    elf.strtab = find_section(reader, SHT_STRTAB);
 
-    ELFIO::Elf_Half n_sec = reader.sections.size();
+    elf.load_code();
+    elf.load_symbols();
+    elf.load_relocs();
 
-    ELFIO::section* symsec = NULL;
-    for (size_t i = 0; i < n_sec; i++) {
-        ELFIO::section* ssec = reader.sections[i];
-        if (ssec->get_type() == SHT_SYMTAB) {
-            symsec = ssec;
-            break;
+    return elf;
+}
+
+static struct qk_inst* find_inst(struct qk_inst* inst, size_t offset) {
+    while (inst) {
+        if (offset >= inst->offset && offset < inst->offset + inst->size) {
+            return inst;
         }
+        inst = inst->next;
     }
-    // assert(symsec);
-    elf.symtab.symtab = symsec;
+    return NULL;
+}
 
-    for (size_t i = 0; i < n_sec; i++) {
-        ELFIO::section* ssec = reader.sections[i];
-        if (ssec->get_type() == SHT_STRTAB) {
-            elf.strsec = ssec;
-            break;
+void qk_elf::load_relocs() {
+    for (size_t i = 0; i < reader.sections.size(); i++) {
+        section* sec = reader.sections[i];
+        if (sec->get_type() != SHT_RELA) {
+            continue;
         }
-    }
-    // assert(elf.strsec);
 
-    for (size_t i = 0; i < n_sec; i++) {
-        ELFIO::section* psec = reader.sections[i];
-        if ((psec->get_flags() & SHF_EXECINSTR) != 0) {
-            ELFIO::section* relasec = NULL;
-            for (size_t j = 0; j < n_sec; j++) {
-                ELFIO::section* rsec = reader.sections[j];
-                if (rsec->get_type() == SHT_RELA && rsec->get_info() == i) {
-                    relasec = rsec;
+        struct qk_code* code = NULL;
+        size_t info = sec->get_info();
+        if (info >= 0 && info < reader.sections.size() && (reader.sections[info]->get_flags() & SHF_EXECINSTR) != 0) {
+            // this is a rela section for a code section, find the code section
+            for (struct qk_code* s : codes) {
+                if (s->index == info) {
+                    code = s;
                     break;
                 }
             }
+        }
 
-            struct exsec* exsec = (struct exsec*) malloc(sizeof(struct exsec));
-            assert(exsec);
-            *exsec = (struct exsec){
-                .section = psec,
-                .rela = NULL,
+        struct qk_rela* rela = new qk_rela();
+        assert(rela);
+        rela->section = sec;
+
+        if (code)
+            code->rela = rela;
+
+        relocation_section_accessor rela_accessor(reader, sec);
+        for (size_t j = 0; j < rela_accessor.get_entries_num(); j++) {
+            Elf64_Addr offset;
+            ELFIO::Elf_Word symbol;
+            ELFIO::Elf_Word type;
+            ELFIO::Elf_Sxword addend;
+            rela_accessor.get_entry(j, offset, symbol, type, addend);
+
+            struct qk_reloc reloc;
+
+            // if it's a code relocation
+            // if the relocation value is in a code section
+            // otherwise
+            if (code) {
+                reloc.kind = QK_RELOC_CODE;
+                struct qk_inst* inst = find_inst(code->inst_front, offset);
+                assert(inst);
+                reloc.r.code = (struct qk_reloc_code){
+                    .inst = inst,
+                };
+                // TODO: possible to have code symbol as well
+            } else if (symtab.has_symbol(symbol)) {
+                reloc.kind = QK_RELOC_VALUE;
+                // TODO: find inst for symbol + addend
+            } else {
+                reloc.kind = QK_RELOC_OTHER;
+            }
+
+            rela->relocs.push_back(reloc);
+        }
+
+        relas.push_back(rela);
+    }
+}
+
+void qk_elf::load_code() {
+    for (size_t i = 0; i < reader.sections.size(); i++) {
+        section* sec = reader.sections[i];
+        if ((sec->get_flags() & SHF_EXECINSTR) != 0) {
+            struct qk_code* code = new qk_code();
+            assert(code);
+            *code = (struct qk_code){
+                .section = sec,
                 .index = i,
-                .inst_front = NULL,
-                .inst_back = NULL,
-                .inst_size = 0,
             };
 
-            ELFIO::Elf_Xword size = psec->get_size();
-            const char* data = psec->get_data();
+            Elf_Xword size = sec->get_size();
+            const char* data = sec->get_data();
 
-            std::vector<struct inst*> insts;
+            std::vector<struct qk_inst*> insts;
 
             size_t n = 0;
             while (n < size) {
                 cs_insn* insn = NULL;
                 size_t addr = n;
-                size_t count = cs_disasm(elf.handle, (uint8_t*) &data[n], 4, addr, 0, &insn);
-                if (count != 1) {
-                    fprintf(stderr, "failed to disassemble %x at %lx", *((uint32_t*) &data[n]), addr);
-                }
+                // assumes instructions are 4 bytes
+                size_t count = cs_disasm(cs_handle, (uint8_t*) &data[n], 4, addr, 0, &insn);
                 size_t length = 4;
+                if (count != 1) {
+                    // assumes instructions are 4 bytes
+                    fprintf(stderr, "failed to disassemble %x at %lx\n", *((uint32_t*) &data[n]), addr);
+                } else {
+                    length = insn->size;
+                }
 
-                struct inst* inst = (struct inst*) calloc(1, sizeof(struct inst));
+                struct qk_inst* inst = new qk_inst();
                 assert(inst);
 
                 inst->original = true;
@@ -81,95 +140,41 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 inst->size = length;
                 inst->offset = n;
 
-                int64_t target = -1;
+                inst->target_addr = -1;
+                if (insn) {
+                    inst->insn = *insn;
+                    inst->target_addr = arm64_branch_target(inst->insn);
 
-                if (insn != NULL) {
-                    inst->insn = insn[0];
-
-                    cs_detail* detail = inst->insn.detail;
-                    switch (inst->insn.id) {
-                    case ARM64_INS_B:
-                        target = detail->arm64.operands[0].imm;
-                        break;
-                    case ARM64_INS_BL:
-                        target = detail->arm64.operands[0].imm;
-                        break;
-                    case ARM64_INS_CBZ:
-                        target = detail->arm64.operands[1].imm;
-                        break;
-                    case ARM64_INS_CBNZ:
-                        target = detail->arm64.operands[1].imm;
-                        break;
-                    case ARM64_INS_TBZ:
-                        target = detail->arm64.operands[2].imm;
-                        break;
-                    case ARM64_INS_TBNZ:
-                        target = detail->arm64.operands[2].imm;
-                        break;
-                    case ARM64_INS_BR:
-                        exsec->needs_rebound = true;
-                        break;
-                    }
+                    // TODO: detect if rebound table is necessary
                 }
 
-                inst->_target_addr = target;
-
-                exsec->push_back(inst);
+                code->push_back(inst);
                 n += length;
-
                 insts.push_back(inst);
             }
 
+            // assumes instructions are 4 bytes
             const size_t INST_SIZE = 4;
-            for (struct inst* inst : insts) {
-                if (inst->_target_addr != -1) {
-                    inst->target = insts[inst->_target_addr / INST_SIZE];
+            for (auto& inst : insts) {
+                if (inst->target_addr != -1) {
+                    inst->target = insts[inst->target_addr / INST_SIZE];
                 }
             }
 
-            if (exsec->needs_rebound) {
-                exsec->orig_size = exsec->inst_size;
+            if (code->rebound) {
+                code->rebound_size = code->inst_size;
             }
 
-            elf.exsecs.push_back(exsec);
-
-            if (relasec != NULL) {
-                struct rela* relap = (struct rela*) calloc(1, sizeof(struct rela));
-                assert(relap);
-                relap->rela = relasec;
-
-                ELFIO::relocation_section_accessor rela(reader, relasec);
-                for (size_t i = 0; i < rela.get_entries_num(); i++) {
-                    Elf64_Addr offset;
-                    ELFIO::Elf_Word symbol;
-                    ELFIO::Elf_Word type;
-                    ELFIO::Elf_Sxword addend;
-                    rela.get_entry(i, offset, symbol, type, addend);
-
-                    struct inst* inst = exsec->inst_front;
-                    while (inst) {
-                        if (offset >= inst->offset && offset < inst->offset + inst->size) {
-                            struct reloc reloc = (struct reloc){
-                                .inst = inst,
-                            };
-                            assert(offset == inst->offset);
-                            inst->has_reloc = true;
-                            relap->relocs.push_back(reloc);
-                            break;
-                        }
-                        inst = inst->next;
-                    }
-                }
-                elf.relas.push_back(relap);
-                exsec->rela = relap;
-            }
+            codes.push_back(code);
         }
     }
+}
 
-    if (!symsec)
-        return elf;
+void qk_elf::load_symbols() {
+    if (!symtab.section)
+        return;
 
-    ELFIO::symbol_section_accessor syma(reader, symsec);
+    symbol_section_accessor syma(reader, symtab.section);
     for (size_t i = 0; i < syma.get_symbols_num(); i++) {
         std::string name;
         Elf64_Addr value;
@@ -177,21 +182,23 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
         unsigned char bind, type, other;
         ELFIO::Elf_Half section_index;
         syma.get_symbol(i, name, value, size, bind, type, section_index, other);
-        if (section_index != SHN_COMMON && section_index < n_sec && (reader.sections[section_index]->get_flags() & SHF_EXECINSTR) != 0) {
-            struct exsec* exsec = NULL;
-            struct inst* inst = NULL;
-            for (auto& s : elf.exsecs) {
+        if (section_index != SHN_COMMON && section_index < reader.sections.size() &&
+                (reader.sections[section_index]->get_flags() & SHF_EXECINSTR) != 0) {
+            // Symbol points inside a code section.
+            struct qk_code* code = NULL;
+            struct qk_inst* inst = NULL;
+            for (auto& s : this->codes) {
                 if (s->index == section_index) {
-                    exsec = s;
+                    code = s;
                     inst = s->inst_front;
                 }
             }
             if (!inst) {
+                // code section has no code?
                 continue;
             }
-            assert(inst);
-            struct inst* start = NULL;
-            struct inst* end = NULL;
+            struct qk_inst* start = NULL;
+            struct qk_inst* end = NULL;
             size_t endidx = value + size;
             while (inst) {
                 if (value >= inst->offset && value < inst->offset + inst->size) {
@@ -206,137 +213,119 @@ struct elf quark_readelf(ELFIO::elfio& reader, csh handle) {
                 inst = inst->next;
             }
             assert(start);
-            elf.symtab.syms.push_back((struct sym){
+            symtab.syms.push_back((struct qk_sym){
                 .start = start,
                 .end = end,
                 .index = i,
-                .exsec = exsec,
+                .code = code,
             });
         } else {
-            elf.symtab.syms.push_back((struct sym){
+            // Symbol does not point into a code section.
+            symtab.syms.push_back((struct qk_sym){
                 .start = NULL,
                 .index = i,
             });
         }
     }
-
-    return elf;
 }
 
-void elf::encode(const char* outname) {
-    for (auto& s : this->exsecs) {
+void qk_elf::encode(const char* outname) {
+    for (auto& s : codes) {
         s->encode();
     }
-    for (auto& r : this->relas) {
-        r->encode(this->reader, this->strsec, this->symtab.symtab);
+    for (auto& r : relas) {
+        r->encode(reader, strtab, symtab.section);
     }
-    this->symtab.encode(this);
+    symtab.encode(this);
+
     reader.save(outname);
 }
 
-void exsec::insert_after(struct inst* n, struct inst* inst) {
-    inst->next = n->next;
-    inst->prev = n;
-    if (n->next) {
-        n->next->prev = inst;
-    } else {
-        this->inst_back = inst;
-    }
-    n->next = inst;
-    this->inst_size += inst->size;
-}
-
-void exsec::insert_before(struct inst* n, struct inst* inst) {
-    inst->next = n;
-    inst->prev = n->prev;
-    if (n->prev) {
-        n->prev->next = inst;
-    } else {
-        this->inst_front = inst;
-    }
-    n->prev = inst;
-    this->inst_size += inst->size;
-}
-
-void exsec::push_back(struct inst* n) {
-    n->next = NULL;
-    n->prev = this->inst_back;
-    if (this->inst_back)
-        this->inst_back->next = n;
-    else
-        this->inst_front = n;
-    this->inst_back = n;
-    this->inst_size += n->size;
-}
-
-void exsec::encode() {
-    char* data = (char*) calloc(this->inst_size + this->orig_size, 1);
-    assert(data);
-
+void qk_code::fill_offsets(char* data) {
     size_t n = 0;
     size_t r = 0;
-    struct inst* inst = this->inst_front;
+    struct qk_inst* inst = inst_front;
     while (inst) {
-        inst->offset = n + orig_size;
-        inst->rebound_offset = r;
+        inst->offset = n + rebound_size;
 
-        if (needs_rebound) {
-            if (inst->original) {
-                uint32_t bl = arm64_bl((n - r + orig_size) / 4);
-                memcpy(&data[r], &bl, inst->size);
-                r += inst->size;
-            }
+        if (rebound_size > 0 && inst->original) {
+            uint32_t b = arm64_b((n - r + rebound_size) / 4);
+            memcpy(&data[r], &b, inst->size);
+            r += inst->size;
         }
 
         n += inst->size;
         inst = inst->next;
     }
+}
 
-    n = r;
-    inst = this->inst_front;
+void qk_code::encode() {
+    if (rebound && inst_size == rebound_size) {
+        // Needed a rebound table, but the section wasn't modified so we don't
+        // need it after all.
+        rebound_size = 0;
+        rebound = false;
+    }
+
+    char* data = (char*) calloc(1, rebound_size + inst_size);
+    assert(data);
+
+    fill_offsets(data);
+
+    size_t n = rebound_size;
+    struct qk_inst* inst = inst_front;
     while (inst) {
-        if (inst->target != NULL) {
-            inst->data = reassemble(inst->insn, inst->data, inst->target->offset - inst->offset);
+        if (inst->target) {
+            inst->data = arm64_branch_reassemble(inst->insn, inst->data, inst->target->offset - inst->offset);
         }
         memcpy(&data[n], &inst->data, inst->size);
         n += inst->size;
         inst = inst->next;
     }
-    this->section->set_data((const char*) data, this->inst_size + this->orig_size);
+    section->set_data((const char*) data, rebound_size + inst_size);
 }
 
-void rela::encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab) {
-    ELFIO::relocation_section_accessor rela(reader, this->rela);
-    ELFIO::string_section_accessor stra(strsec);
+void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symtab) {
+    ELFIO::relocation_section_accessor relaa(reader, section);
+    ELFIO::string_section_accessor stra(strtab);
     ELFIO::symbol_section_accessor syma(reader, symtab);
-    for (size_t i = 0; i < this->relocs.size(); i++) {
-        struct reloc& r = this->relocs[i];
-        if (r.new_reloc) {
-            if (r.str) {
-                ELFIO::Elf_Word str_index = stra.add_string(r.str);
-                ELFIO::Elf_Word sym_index = syma.add_symbol(str_index, r.value ? r.value->offset : 0, 0, r.info, 0, r.shndx);
-                rela.add_entry(r.inst->offset, sym_index, r.type, 0);
-            } else {
-                rela.add_entry(r.inst->offset, STN_UNDEF, r.type, 0);
-            }
-        } else {
+    for (size_t i = 0; i < relocs.size(); i++) {
+        struct qk_reloc& reloc = relocs[i];
+        switch (reloc.kind) {
+        case QK_RELOC_OTHER:
+            break;
+        case QK_RELOC_VALUE:
+            // TODO: encode qk_reloc_value
+            break;
+        case QK_RELOC_CODE:
             ELFIO::Elf64_Addr offset;
             ELFIO::Elf_Word symbol;
             ELFIO::Elf_Word type;
             ELFIO::Elf_Sxword addend;
-            rela.get_entry(i, offset, symbol, type, addend);
-            rela.set_entry(i, r.inst->offset, symbol, type, addend);
+            relaa.get_entry(i, offset, symbol, type, addend);
+            relaa.set_entry(i, reloc.r.code.inst->offset, symbol, type, addend);
+            break;
+        case QK_RELOC_NEW:
+            auto& r = reloc.r.new_;
+            if (r.str) {
+                ELFIO::Elf_Word str_index = stra.add_string(r.str);
+                ELFIO::Elf_Word sym_index = syma.add_symbol(str_index, r.value ? r.value->offset : 0, 0, r.info, 0, r.shndx);
+                relaa.add_entry(r.inst->offset, sym_index, r.type, 0);
+            } else {
+                relaa.add_entry(r.inst->offset, STN_UNDEF, r.type, 0);
+            }
+            break;
         }
     }
 }
 
-void symtab::encode(struct elf* elf) {
-    if (!this->symtab)
+void qk_symtab::encode(struct qk_elf* elf) {
+    if (!section)
         return;
 
-    ELFIO::symbol_section_accessor syma(elf->reader, this->symtab);
-    for (size_t i = 0; i < this->syms.size(); i++) {
-        if (this->syms[i].start == NULL) {
+    symbol_section_accessor syma(elf->reader, section);
+    for (size_t i = 0; i < syms.size(); i++) {
+        if (syms[i].start == NULL) {
             continue;
         }
         std::string name;
@@ -344,19 +333,63 @@ void symtab::encode(struct elf* elf) {
         ELFIO::Elf_Xword size;
         unsigned char bind, type, other;
         ELFIO::Elf_Half section_index;
-        syma.get_symbol(this->syms[i].index, name, value, size, bind, type, section_index, other);
-        size_t start = this->syms[i].start->offset;
-        if (!this->syms[i].end) {
-            size = this->syms[i].exsec->inst_size - start;
+        syma.get_symbol(syms[i].index, name, value, size, bind, type, section_index, other);
+        size_t start = syms[i].start->offset;
+        if (!syms[i].end) {
+            size = syms[i].code->inst_size - start;
         } else {
-            size = this->syms[i].end->offset - start;
+            size = syms[i].end->offset - start;
         }
-        syma.set_symbol(this->syms[i].index, start, size);
+        syma.set_symbol(syms[i].index, start, size);
     }
     syma.arrange_local_symbols([&](ELFIO::Elf_Xword first, ELFIO::Elf_Xword second) {
         for (auto& r : elf->relas) {
-            ELFIO::relocation_section_accessor access(elf->reader, r->rela);
+            relocation_section_accessor access(elf->reader, r->section);
             access.swap_symbols(first, second);
         }
     });
+}
+
+void qk_code::push_back(struct qk_inst* n) {
+    n->next = NULL;
+    n->prev = inst_back;
+    if (inst_back)
+        inst_back->next = n;
+    else
+        inst_front = n;
+    inst_back = n;
+    inst_size += n->size;
+}
+
+void qk_code::insert_after(struct qk_inst* n, struct qk_inst* inst) {
+    inst->next = n->next;
+    inst->prev = n;
+    if (n->next) {
+        n->next->prev = inst;
+    } else {
+        inst_back = inst;
+    }
+    n->next = inst;
+    inst_size += inst->size;
+}
+
+void qk_code::insert_before(struct qk_inst* n, struct qk_inst* inst) {
+    inst->next = n;
+    inst->prev = n->prev;
+    if (n->prev) {
+        n->prev->next = inst;
+    } else {
+        inst_front = inst;
+    }
+    n->prev = inst;
+    inst_size += inst->size;
+}
+
+bool qk_symtab::has_symbol(size_t index) {
+    for (auto& sym : syms) {
+        if (sym.index == index) {
+            return true;
+        }
+    }
+    return false;
 }

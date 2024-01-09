@@ -1,11 +1,30 @@
 #pragma once
 
-#include <capstone/capstone.h>
 #include <assert.h>
+#include <capstone/capstone.h>
 
 #include "bits.hh"
 
-static inline uint32_t reassemble(cs_insn insn, uint32_t data, int64_t imm) {
+static inline int64_t arm64_branch_target(cs_insn insn) {
+    cs_detail* detail = insn.detail;
+    switch (insn.id) {
+    case ARM64_INS_B:
+        return detail->arm64.operands[0].imm;
+    case ARM64_INS_BL:
+        return detail->arm64.operands[0].imm;
+    case ARM64_INS_CBZ:
+        return detail->arm64.operands[1].imm;
+    case ARM64_INS_CBNZ:
+        return detail->arm64.operands[1].imm;
+    case ARM64_INS_TBZ:
+        return detail->arm64.operands[2].imm;
+    case ARM64_INS_TBNZ:
+        return detail->arm64.operands[2].imm;
+    }
+    return -1;
+}
+
+static inline uint32_t arm64_branch_reassemble(cs_insn insn, uint32_t data, int64_t imm) {
     imm = imm >> 2;
     switch (insn.id) {
     case ARM64_INS_B:
@@ -41,4 +60,8 @@ static inline uint32_t reassemble(cs_insn insn, uint32_t data, int64_t imm) {
 
 static inline uint32_t arm64_bl(uint32_t imm) {
     return 0x94000000 | imm;
+}
+
+static inline uint32_t arm64_b(uint32_t imm) {
+    return 0x14000000 | imm;
 }

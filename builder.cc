@@ -1,80 +1,84 @@
 #include "builder.hh"
-#include "reloc.hh"
-#include "assemble.hh"
+#include "arm64.hh"
 
 #include <elf.h>
 #include <assert.h>
 
-struct inst* new_inst(struct inst_dat i) {
-    struct inst* alloc = (struct inst*) calloc(1, sizeof(struct inst));
+using namespace ELFIO;
+
+struct qk_inst* new_inst(struct qk_inst_dat i) {
+    struct qk_inst* alloc = new qk_inst();
     assert(alloc);
     alloc->data = i.data;
     alloc->size = i.size;
     return alloc;
 }
 
-struct builder* new_builder(struct elf* elf, struct exsec* s) {
-    struct builder* b = (struct builder*) malloc(sizeof(struct builder));
+struct qk_builder* new_builder(struct qk_elf* elf, struct qk_code* s) {
+    struct qk_builder* b = new qk_builder();
     assert(b);
-    *b = (struct builder){
+    *b = (struct qk_builder){
         .elf = elf,
-        .exsec = s,
+        .code = s,
         .cur = s->inst_front,
     };
     return b;
 }
 
-void builder::add_reloc(struct reloc reloc) {
-    if (!this->exsec->rela) {
-        ELFIO::section* sec = this->elf->reader.sections.add(this->exsec->section->get_name() + ".rela");
+void qk_builder::add_reloc(struct qk_reloc reloc) {
+    if (!code->rela) {
+        section* sec = elf->reader.sections.add(code->section->get_name() + ".rela");
         sec->set_type(SHT_RELA);
-        sec->set_info(this->exsec->section->get_index());
+        sec->set_info(code->section->get_index());
         sec->set_flags(SHF_INFO_LINK);
-        sec->set_entry_size(this->elf->reader.get_default_entry_size(SHT_RELA));
-        sec->set_link(this->elf->symtab.symtab->get_index());
-        this->exsec->rela = (struct rela*) calloc(1, sizeof(struct rela));
-        assert(this->exsec->rela);
-        this->exsec->rela->rela = sec;
-        this->elf->relas.push_back(this->exsec->rela);
+        sec->set_entry_size(elf->reader.get_default_entry_size(SHT_RELA));
+        sec->set_link(elf->symtab.section->get_index());
+        code->rela = new qk_rela();
+        assert(code->rela);
+        code->rela->section = sec;
+        elf->relas.push_back(code->rela);
     }
-    reloc.new_reloc = true;
-    this->exsec->rela->relocs.push_back(reloc);
+    code->rela->relocs.push_back(reloc);
 }
 
-void builder::locate(struct inst* i) {
-    this->cur = i;
+void qk_builder::locate(struct qk_inst* i) {
+    cur = i;
 }
 
-struct inst* builder::insert_after(struct inst* i) {
-    this->exsec->insert_after(this->cur, i);
-    this->cur = i;
-    return this->cur;
+struct qk_inst* qk_builder::insert_after(struct qk_inst* i) {
+    code->insert_after(cur, i);
+    cur = i;
+    return cur;
 }
 
-struct inst* builder::insert_before(struct inst* i) {
-    this->exsec->insert_before(this->cur, i);
-    this->cur = i;
-    return this->cur;
+struct qk_inst* qk_builder::insert_before(struct qk_inst* i) {
+    code->insert_before(cur, i);
+    cur = i;
+    return cur;
 }
 
-struct inst* builder::insert_call_before(const char* fn) {
-    struct inst* inst = this->insert_before(new_inst({arm64_bl(0), 4}));
+struct qk_inst* qk_builder::insert_call_before(const char* fn) {
+    struct qk_inst* inst = insert_before(new_inst({arm64_bl(0), 4}));
 
-    this->add_reloc((struct reloc){
-        .inst = inst,
-        .new_reloc = true,
-        .type = R_AARCH64_CALL26,
-        .str = fn,
-        .value = NULL,
-        .shndx = SHN_UNDEF,
-        .info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+    add_reloc((struct qk_reloc){
+        .kind = QK_RELOC_NEW,
+        .r = {
+            .new_ = (struct qk_reloc_new){
+                .inst = inst,
+                .type = R_AARCH64_CALL26,
+                .str = fn,
+                .value = NULL,
+                .shndx = SHN_UNDEF,
+                .info = ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+            },
+        },
     });
 
-    return this->cur;
+    return cur;
 }
 
-struct inst* builder::insert_rtcall_before(const char* fn) {
-    struct inst_dat ops[] = {
+struct qk_inst* qk_builder::insert_rtcall_before(const char* fn) {
+    struct qk_inst_dat ops[] = {
         {0xa9bf23fe, 4}, // stp x30, x8, [sp, -16]!
         {0x90000008, 4}, // adrp x8, fn
         {0xf9400108, 4}, // ldr x8, [x8]
@@ -98,28 +102,33 @@ struct inst* builder::insert_rtcall_before(const char* fn) {
         {R_AARCH64_CALL26, 3, "__quark_wrapper", -1, ELF64_ST_INFO(STB_GLOBAL, STT_NOTYPE), SHN_UNDEF},
     };
 
-    std::vector<inst*> insts;
+    std::vector<struct qk_inst*> insts;
 
-    struct inst* inst = new_inst(ops[0]);
-    this->insert_before(inst);
+    struct qk_inst* inst = new_inst(ops[0]);
+    insert_before(inst);
     insts.push_back(inst);
-    for (size_t i = 1; i < sizeof(ops)/sizeof(struct inst_dat); i++) {
+    for (size_t i = 1; i < sizeof(ops) / sizeof(struct qk_inst_dat); i++) {
         inst = new_inst(ops[i]);
-        this->insert_after(inst);
+        insert_after(inst);
         insts.push_back(inst);
     }
 
-    for (size_t i = 0; i < sizeof(relocs)/sizeof(struct reloc_info); i++) {
+    for (size_t i = 0; i < sizeof(relocs) / sizeof(struct reloc_info); i++) {
         struct reloc_info rinf = relocs[i];
-        this->add_reloc((struct reloc){
-            .inst = insts[rinf.idx],
-            .type = rinf.type,
-            .str = rinf.str,
-            .value = rinf.value_idx != -1 ? insts[rinf.value_idx] : NULL,
-            .shndx = rinf.shndx,
-            .info = rinf.info,
+        add_reloc((struct qk_reloc){
+            .kind = QK_RELOC_NEW,
+            .r = {
+                .new_ = (struct qk_reloc_new){
+                    .inst = insts[rinf.idx],
+                    .type = rinf.type,
+                    .str = rinf.str,
+                    .value = rinf.value_idx != -1 ? insts[rinf.value_idx] : NULL,
+                    .shndx = rinf.shndx,
+                    .info = rinf.info,
+                },
+            },
         });
     }
 
-    return this->cur;
+    return cur;
 }

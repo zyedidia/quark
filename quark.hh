@@ -1,88 +1,133 @@
 #pragma once
 
-#include <stdint.h>
 #include <vector>
 #include <capstone/capstone.h>
 
 #include "elfio/elfio.hpp"
 
-struct inst {
+// Disassembled instruction part of the instruction list.
+struct qk_inst {
+    // assumes instructions are 4 bytes
     uint32_t data;
-    cs_insn insn;
     size_t size;
 
-    int64_t _target_addr;
-    struct inst* target;
+    cs_insn insn;
 
-    bool has_reloc;
+    int64_t target_addr; // temporary
+    struct qk_inst* target;
+
     bool original;
 
     size_t offset;
-    size_t rebound_offset;
 
-    struct inst* next;
-    struct inst* prev;
+    struct qk_inst* next;
+    struct qk_inst* prev;
 };
 
-struct exsec {
+// Editable code section.
+struct qk_code {
     ELFIO::section* section;
-    struct rela* rela;
     size_t index;
+    struct qk_rela* rela;
 
-    struct inst* inst_front;
-    struct inst* inst_back;
+    struct qk_inst* inst_front;
+    struct qk_inst* inst_back;
     size_t inst_size;
-    size_t orig_size;
+    size_t rebound_size;
 
-    bool needs_rebound;
+    bool rebound;
 
-    void push_back(struct inst* inst);
-    void insert_after(struct inst* n, struct inst* new_inst);
-    void insert_before(struct inst* n, struct inst* new_inst);
+    void push_back(struct qk_inst* inst);
+    void insert_after(struct qk_inst* n, struct qk_inst* new_inst);
+    void insert_before(struct qk_inst* n, struct qk_inst* new_inst);
+    void fill_offsets(char* data);
     void encode();
 };
 
-struct reloc {
-    struct inst* inst;
+struct qk_reloc_code {
+    struct qk_inst* inst;
+};
 
-    bool new_reloc;
+struct qk_reloc_value {
+    // one or the other (depending on if inst is null)
+    struct qk_inst* inst;
+    ELFIO::Elf64_Addr offset;
+
+    ELFIO::Elf_Word symbol_index;
+    struct qk_inst* value;
+};
+
+struct qk_reloc_other {
+
+};
+
+struct qk_reloc_new {
+    struct qk_inst* inst;
     unsigned short type;
 
     // has symbol if str is non-null (symbol name)
     const char* str;
-    struct inst* value;
+    struct qk_inst* value;
     ELFIO::Elf_Half shndx;
     unsigned char info;
 };
 
-struct rela {
-    ELFIO::section* rela;
-    std::vector<struct reloc> relocs;
+enum {
+    QK_RELOC_OTHER = 0,
+    QK_RELOC_CODE  = 1,
+    QK_RELOC_VALUE = 2,
+    QK_RELOC_NEW   = 3,
+};
+
+// Editable relocation.
+struct qk_reloc {
+    unsigned kind;
+    union {
+        struct qk_reloc_code code;
+        struct qk_reloc_value value;
+        struct qk_reloc_other other;
+        struct qk_reloc_new new_;
+    } r;
+};
+
+// Section full of relocation entries.
+struct qk_rela {
+    ELFIO::section* section;
+    std::vector<struct qk_reloc> relocs;
+
     void encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab);
 };
 
-struct sym {
-    struct inst* start;
-    struct inst* end;
+// Editable symbol.
+struct qk_sym {
+    struct qk_inst* start;
+    struct qk_inst* end;
     size_t index;
-    struct exsec* exsec;
+    struct qk_code* code;
 };
 
-struct symtab {
-    ELFIO::section* symtab;
-    std::vector<struct sym> syms;
-    void encode(struct elf* elf);
+// Editable symbol table.
+struct qk_symtab {
+    ELFIO::section* section;
+    std::vector<struct qk_sym> syms;
+
+    void encode(struct qk_elf* elf);
+    bool has_symbol(size_t index);
 };
 
-struct elf {
+struct qk_elf {
     ELFIO::elfio& reader;
-    ELFIO::section* strsec;
-    std::vector<struct exsec*> exsecs;
-    std::vector<struct rela*> relas;
-    struct symtab symtab;
-    csh handle;
+    std::vector<struct qk_code*> codes;
+    std::vector<struct qk_rela*> relas;
+    ELFIO::section* strtab;
+    struct qk_symtab symtab;
 
+    csh cs_handle;
+
+    void load_relocs();
+    void load_code();
+    void load_symbols();
     void encode(const char* outname);
 };
 
-struct elf quark_readelf(ELFIO::elfio& reader, csh handle);
+struct qk_elf qk_readelf(ELFIO::elfio& reader, csh handle);

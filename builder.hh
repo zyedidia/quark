@@ -4,23 +4,23 @@
 
 #include "quark.hh"
 
-struct builder {
-    struct elf* elf;
-    struct exsec* exsec;
-    struct inst* cur;
+struct qk_builder {
+    struct qk_elf* elf;
+    struct qk_code* code;
+    struct qk_inst* cur;
 
-    void locate(struct inst* i);
-    void add_reloc(struct reloc reloc);
-    struct inst* insert_after(struct inst* i);
-    struct inst* insert_before(struct inst* i);
-    struct inst* insert_rtcall_before(const char* fn);
-    struct inst* insert_call_before(const char* fn);
+    void locate(struct qk_inst* i);
+    void add_reloc(struct qk_reloc reloc);
+    struct qk_inst* insert_after(struct qk_inst* i);
+    struct qk_inst* insert_before(struct qk_inst* i);
+    struct qk_inst* insert_rtcall_before(const char* fn);
+    struct qk_inst* insert_call_before(const char* fn);
 };
 
-struct builder* new_builder(struct elf* elf, struct exsec* s);
+struct qk_builder* new_builder(struct qk_elf* elf, struct qk_code* s);
 
-struct inst_dat {
+struct qk_inst_dat {
     uint32_t data;
     size_t size;
 };
-struct inst* new_inst(struct inst_dat i);
+struct qk_inst* new_inst(struct qk_inst_dat i);

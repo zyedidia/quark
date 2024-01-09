@@ -4,6 +4,7 @@
 
 #include "elfio/elfio.hpp"
 #include "quark.hh"
+#include "builder.hh"
 
 using namespace ELFIO;
 
@@ -32,6 +33,23 @@ int main(int argc, char** argv) {
     assert(reader.get_type() == ELFIO::ET_REL);
 
     struct qk_elf elf = qk_readelf(reader, handle);
+
+    const uint64_t INST_RET = 0xd65f03c0;
+    for (auto& sec : elf.codes) {
+        struct qk_builder* b = new_builder(&elf, sec);
+        struct qk_inst* inst = sec->inst_front;
+        while (inst) {
+            if (inst->data == INST_RET) {
+                b->locate(inst);
+                b->insert_before(new_inst((struct qk_inst_dat){
+                    .data = 0xd503201f,
+                    .size = 4,
+                }));
+            }
+            inst = inst->next;
+        }
+        delete b;
+    }
 
     elf.encode(argv[2]);
     cs_close(&handle);

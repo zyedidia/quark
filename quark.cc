@@ -76,20 +76,30 @@ void qk_elf::load_relocs() {
 
             struct qk_reloc reloc;
 
-            // if it's a code relocation
-            // if the relocation value is in a code section
-            // otherwise
-            if (code) {
+            auto sym = symtab.get_symbol(symbol);
+            if (sym.has_value()) {
+                // relocation is in a code section
+                reloc.kind = QK_RELOC_VALUE;
+                struct qk_inst* inst = sym.value().start;
+                ELFIO::Elf_Sxword n = 0;
+                while (inst && n < addend) {
+                    n += inst->size;
+                    inst = inst->next;
+                }
+                reloc.r.value = (struct qk_reloc_value){
+                    .value = inst,
+                };
+                if (code) {
+                    reloc.r.value.inst = find_inst(code->inst_front, offset);
+                }
+            } else if (code) {
+                // code relocation
                 reloc.kind = QK_RELOC_CODE;
                 struct qk_inst* inst = find_inst(code->inst_front, offset);
                 assert(inst);
                 reloc.r.code = (struct qk_reloc_code){
                     .inst = inst,
                 };
-                // TODO: possible to have code symbol as well
-            } else if (symtab.has_symbol(symbol)) {
-                reloc.kind = QK_RELOC_VALUE;
-                // TODO: find inst for symbol + addend
             } else {
                 reloc.kind = QK_RELOC_OTHER;
             }
@@ -385,11 +395,11 @@ void qk_code::insert_before(struct qk_inst* n, struct qk_inst* inst) {
     inst_size += inst->size;
 }
 
-bool qk_symtab::has_symbol(size_t index) {
+std::optional<struct qk_sym> qk_symtab::get_symbol(size_t index) {
     for (auto& sym : syms) {
         if (sym.index == index) {
-            return true;
+            return sym;
         }
     }
-    return false;
+    return {};
 }

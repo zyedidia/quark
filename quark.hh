@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <optional>
 #include <capstone/capstone.h>
 
 #include "elfio/elfio.hpp"
@@ -49,11 +50,7 @@ struct qk_reloc_code {
 };
 
 struct qk_reloc_value {
-    // one or the other (depending on if inst is null)
-    struct qk_inst* inst;
-    ELFIO::Elf64_Addr offset;
-
-    ELFIO::Elf_Word symbol_index;
+    struct qk_inst* inst; // may be null if not a code offset
     struct qk_inst* value;
 };
 
@@ -112,7 +109,7 @@ struct qk_symtab {
     std::vector<struct qk_sym> syms;
 
     void encode(struct qk_elf* elf);
-    bool has_symbol(size_t index);
+    std::optional<struct qk_sym> get_symbol(size_t index);
 };
 
 struct qk_elf {

@@ -11,6 +11,10 @@ import (
 	"github.com/adrg/xdg"
 )
 
+func isobj(name string) bool {
+	return strings.HasSuffix(name, ".o") || strings.HasSuffix(name, ".lo")
+}
+
 func run(cmd string, args ...string) error {
 	c := exec.Command(cmd, args...)
 	fmt.Println(c)
@@ -67,14 +71,13 @@ func main() {
 		switch {
 		case strings.HasPrefix(arg, "--quark-module="):
 			continue
-		case strings.HasSuffix(arg, ".a"), strings.HasSuffix(arg, ".o"):
-			f, err := cache.Quarkify(arg, module)
-			if err != nil {
-				log.Fatal(err)
-			}
-			ldargs = append(ldargs, f)
 		case strings.HasPrefix(arg, "-l"):
-			name := "lib" + arg[len("-l"):] + ".a"
+			var name string
+			if strings.HasPrefix(arg, "-l:") {
+				name = arg[len("-l:"):]
+			} else {
+				name = "lib" + arg[len("-l"):] + ".a"
+			}
 			lib, ok := findlib(name, search)
 			if ok {
 				f, err := cache.Quarkify(lib, module)
@@ -83,12 +86,18 @@ func main() {
 				}
 				ldargs = append(ldargs, f)
 			}
+		case strings.HasSuffix(arg, ".a"), isobj(arg):
+			f, err := cache.Quarkify(arg, module)
+			if err != nil {
+				log.Fatal(err)
+			}
+			ldargs = append(ldargs, f)
 		default:
 			ldargs = append(ldargs, arg)
 		}
 	}
 
-	err = run("gold", ldargs...)
+	err = run("ld", ldargs...)
 	if err != nil {
 		log.Fatal(err)
 	}

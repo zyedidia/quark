@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
         struct qk_builder* b = new_builder(&elf, sec);
         struct qk_inst* inst = sec->inst_front;
         while (inst) {
-            if (inst->data == INST_RET) {
+            if (inst->data == INST_RET && inst != sec->inst_front) {
                 b->locate(inst);
                 b->insert_before(new_inst((struct qk_inst_dat){
                     .data = 0xd503201f,

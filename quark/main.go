@@ -8,10 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/erikgeiser/ar"
 )
+
+func isobj(name string) bool {
+	return strings.HasSuffix(name, ".o") || strings.HasSuffix(name, ".lo")
+}
 
 func runcmd(c string, args ...string) error {
 	cmd := exec.Command(c, args...)
@@ -78,13 +83,14 @@ func main() {
 	args := flag.Args()
 
 	var objs []Object
+	names := make(map[string]int)
 	for _, a := range args {
 		f, err := os.Open(a)
 		if err != nil {
 			fatal(err)
 		}
 
-		if strings.HasSuffix(a, ".o") {
+		if isobj(a) {
 			data, err := io.ReadAll(f)
 			if err != nil {
 				fatal(err)
@@ -104,8 +110,13 @@ func main() {
 				if err != nil {
 					fatal(err)
 				}
+				name := hdr.Name
+				if names[name] >= 1 {
+					name = strconv.Itoa(names[name]) + name
+				}
+				names[name]++
 				objs = append(objs, Object{
-					name: hdr.Name,
+					name: name,
 					data: data,
 				})
 			}
@@ -113,7 +124,7 @@ func main() {
 		f.Close()
 	}
 
-	if len(objs) == 1 && strings.HasSuffix(*output, ".o") {
+	if len(objs) == 1 && isobj(*output) {
 		f := temp(objs[0].name)
 		err := os.WriteFile(f, objs[0].data, 0666)
 		if err != nil {

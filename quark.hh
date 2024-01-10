@@ -18,8 +18,10 @@ struct qk_inst {
     struct qk_inst* target;
 
     bool original;
+    bool has_reloc;
 
     size_t offset;
+    size_t orig_offset;
 
     struct qk_inst* next;
     struct qk_inst* prev;
@@ -42,6 +44,7 @@ struct qk_code {
     void insert_after(struct qk_inst* n, struct qk_inst* new_inst);
     void insert_before(struct qk_inst* n, struct qk_inst* new_inst);
     void fill_offsets(char* data);
+    void check_rebound();
     void encode();
 };
 

@@ -88,7 +88,7 @@ func main() {
 		}
 	}
 
-	err = run("ld", ldargs...)
+	err = run("gold", ldargs...)
 	if err != nil {
 		log.Fatal(err)
 	}

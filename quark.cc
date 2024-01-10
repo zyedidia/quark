@@ -27,7 +27,25 @@ struct qk_elf qk_readelf(elfio& reader, csh handle) {
     elf.load_symbols();
     elf.load_relocs();
 
+    for (auto& s : elf.codes) {
+        s->check_rebound();
+    }
+
     return elf;
+}
+
+// Determine if a rebound table is necessary for this section.
+void qk_code::check_rebound() {
+    struct qk_inst* inst = inst_front;
+    while (inst) {
+        if (!inst->has_reloc && arm64_is_adr(inst->insn)) {
+            rebound = true;
+            rebound_size = inst_size;
+            printf("rebound table: %ld\n", rebound_size);
+            break;
+        }
+        inst = inst->next;
+    }
 }
 
 static struct qk_inst* find_inst(struct qk_inst* inst, size_t offset) {
@@ -91,13 +109,16 @@ void qk_elf::load_relocs() {
                     .value = inst,
                 };
                 if (code) {
+                    // also a code relocation
                     reloc.r.value.inst = find_inst(code->inst_front, offset);
+                    reloc.r.value.inst->has_reloc = true;
                 }
             } else if (code) {
                 // code relocation
                 reloc.kind = QK_RELOC_CODE;
                 struct qk_inst* inst = find_inst(code->inst_front, offset);
                 assert(inst);
+                inst->has_reloc = true;
                 reloc.r.code = (struct qk_reloc_code){
                     .inst = inst,
                 };
@@ -150,13 +171,12 @@ void qk_elf::load_code() {
                 memcpy(&inst->data, &data[n], length);
                 inst->size = length;
                 inst->offset = n;
+                inst->orig_offset = n;
 
                 inst->target_addr = -1;
                 if (insn) {
                     inst->insn = *insn;
-                    inst->target_addr = arm64_branch_target(inst->insn);
-
-                    // TODO: detect if rebound table is necessary
+                    inst->target_addr = arm64_target(inst->insn);
                 }
 
                 code->push_back(inst);
@@ -170,10 +190,6 @@ void qk_elf::load_code() {
                 if (inst->target_addr != -1) {
                     inst->target = insts[inst->target_addr / INST_SIZE];
                 }
-            }
-
-            if (code->rebound) {
-                code->rebound_size = code->inst_size;
             }
 
             codes.push_back(code);
@@ -286,8 +302,11 @@ void qk_code::encode() {
     size_t n = rebound_size;
     struct qk_inst* inst = inst_front;
     while (inst) {
-        if (inst->target) {
-            inst->data = arm64_branch_reassemble(inst->insn, inst->data, inst->target->offset - inst->offset);
+        if (!inst->has_reloc && arm64_is_adr(inst->insn)) {
+            // adr should point into the rebound table
+            inst->data = arm64_reassemble(inst->insn, inst->data, inst->orig_offset + arm64_adr_imm(inst->data) - inst->offset);
+        } else if (!inst->has_reloc && inst->target) {
+            inst->data = arm64_reassemble(inst->insn, inst->data, inst->target->offset - inst->offset);
         }
         memcpy(&data[n], &inst->data, inst->size);
         n += inst->size;

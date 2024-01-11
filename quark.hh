@@ -33,6 +33,8 @@ struct qk_code {
     size_t index;
     struct qk_rela* rela;
 
+    std::unordered_map<size_t, struct qk_inst*> orig_offsets;
+
     struct qk_inst* inst_front;
     struct qk_inst* inst_back;
     size_t inst_size;
@@ -96,7 +98,7 @@ struct qk_rela {
     ELFIO::section* section;
     std::vector<struct qk_reloc> relocs;
 
-    void encode(ELFIO::elfio& reader, ELFIO::section* strsec, ELFIO::section* symtab);
+    void encode(ELFIO::elfio& reader, ELFIO::section* eh_frame, ELFIO::section* strsec, ELFIO::section* symtab);
 };
 
 // Editable symbol.
@@ -121,6 +123,7 @@ struct qk_elf {
     std::vector<struct qk_code*> codes;
     std::vector<struct qk_rela*> relas;
     ELFIO::section* strtab;
+    ELFIO::section* eh_frame;
     struct qk_symtab symtab;
 
     csh cs_handle;

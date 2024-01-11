@@ -39,7 +39,11 @@ func findlib(name string, search []string) (string, bool) {
 }
 
 func main() {
-	args := os.Args[1:]
+	if len(os.Args) < 1 {
+		log.Fatal("no linker given")
+	}
+	ld := os.Args[1]
+	args := os.Args[2:]
 
 	cache, err := LoadCache(filepath.Join(xdg.CacheHome, "quark", "objcache"))
 	if err != nil {
@@ -97,7 +101,7 @@ func main() {
 		}
 	}
 
-	err = run("ld", ldargs...)
+	err = run(ld, ldargs...)
 	if err != nil {
 		log.Fatal(err)
 	}

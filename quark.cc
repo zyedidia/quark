@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <iostream>
 
 #include "quark.hh"
 #include "arm64.hh"
@@ -15,6 +16,16 @@ static section* find_section(elfio& reader, unsigned type) {
     return NULL;
 }
 
+static section* find_section(elfio& reader, std::string name) {
+    for (size_t i = 0; i < reader.sections.size(); i++) {
+        section* sec = reader.sections[i];
+        if (sec->get_name().compare(name) == 0) {
+            return sec;
+        }
+    }
+    return NULL;
+}
+
 struct qk_elf qk_readelf(elfio& reader, csh handle) {
     struct qk_elf elf = (struct qk_elf){
         .reader = reader,
@@ -22,6 +33,7 @@ struct qk_elf qk_readelf(elfio& reader, csh handle) {
     };
     elf.symtab.section = find_section(reader, SHT_SYMTAB);
     elf.strtab = find_section(reader, SHT_STRTAB);
+    elf.eh_frame = find_section(reader, std::string(".eh_frame"));
 
     elf.load_code();
     elf.load_symbols();
@@ -46,16 +58,6 @@ void qk_code::check_rebound() {
         }
         inst = inst->next;
     }
-}
-
-static struct qk_inst* find_inst(struct qk_inst* inst, size_t offset) {
-    while (inst) {
-        if (offset >= inst->offset && offset < inst->offset + inst->size) {
-            return inst;
-        }
-        inst = inst->next;
-    }
-    return NULL;
 }
 
 void qk_elf::load_relocs() {
@@ -110,13 +112,13 @@ void qk_elf::load_relocs() {
                 };
                 if (code) {
                     // also a code relocation
-                    reloc.r.value.inst = find_inst(code->inst_front, offset);
+                    reloc.r.value.inst = code->orig_offsets[offset];
                     reloc.r.value.inst->has_reloc = true;
                 }
             } else if (code) {
                 // code relocation
                 reloc.kind = QK_RELOC_CODE;
-                struct qk_inst* inst = find_inst(code->inst_front, offset);
+                struct qk_inst* inst = code->orig_offsets[offset];
                 assert(inst);
                 inst->has_reloc = true;
                 reloc.r.code = (struct qk_reloc_code){
@@ -179,6 +181,7 @@ void qk_elf::load_code() {
                     inst->target_addr = arm64_target(inst->insn);
                 }
 
+                code->orig_offsets[n] = inst;
                 code->push_back(inst);
                 n += length;
                 insts.push_back(inst);
@@ -260,10 +263,10 @@ void qk_elf::encode(const char* outname) {
     for (auto& s : codes) {
         s->encode();
     }
-    for (auto& r : relas) {
-        r->encode(reader, strtab, symtab.section);
-    }
     symtab.encode(this);
+    for (auto& r : relas) {
+        r->encode(reader, eh_frame, strtab, symtab.section);
+    }
 
     reader.save(outname);
 }
@@ -315,10 +318,20 @@ void qk_code::encode() {
     section->set_data((const char*) data, rebound_size + inst_size);
 }
 
-void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symtab) {
+void qk_rela::encode(elfio& reader, ELFIO::section* eh_frame, ELFIO::section* strtab, ELFIO::section* symtab) {
     ELFIO::relocation_section_accessor relaa(reader, section);
     ELFIO::string_section_accessor stra(strtab);
     ELFIO::symbol_section_accessor syma(reader, symtab);
+
+    char* eh_data = NULL;
+    if (eh_frame && eh_frame->get_index() == section->get_info()) {
+        // this is the rela section for .eh_frame
+        const char* data = eh_frame->get_data();
+        eh_data = (char*) malloc(eh_frame->get_size());
+        assert(eh_data);
+        memcpy(eh_data, data, eh_frame->get_size());
+    }
+
     for (size_t i = 0; i < relocs.size(); i++) {
         struct qk_reloc& reloc = relocs[i];
         if (reloc.kind == QK_RELOC_VALUE) {
@@ -330,6 +343,19 @@ void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symt
             relaa.get_entry(i, offset, symbol, type, addend);
             if (r.inst) {
                 offset = r.inst->offset;
+            }
+            if (eh_data) {
+                std::string name;
+                ELFIO::Elf64_Addr value;
+                ELFIO::Elf_Xword size;
+                unsigned char bind, type, other;
+                ELFIO::Elf_Half section_index;
+                syma.get_symbol(symbol, name, value, size, bind, type, section_index, other);
+                if (type == STT_SECTION) {
+                    size = reader.sections[section_index]->get_size();
+                }
+                ((uint32_t*) &eh_data[offset])[1] = size;
+                // printf("adjust eh_frame %s: %d %ld %d\n", name.c_str(), symbol, size, section_index);
             }
             relaa.set_entry(i, offset, symbol, type, r.value->offset - r.sym_start->offset);
         } else if (reloc.kind == QK_RELOC_CODE) {
@@ -349,6 +375,9 @@ void qk_rela::encode(elfio& reader, ELFIO::section* strtab, ELFIO::section* symt
                 relaa.add_entry(r.inst->offset, STN_UNDEF, r.type, 0);
             }
         }
+    }
+    if (eh_data) {
+        eh_frame->set_data((const char*) eh_data, eh_frame->get_size());
     }
 }
 

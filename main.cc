@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     }
 
     csh handle;
-    if (cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &handle) != CS_ERR_OK) {
+    if (cs_open(CS_ARCH_AARCH64, CS_MODE_ARM, &handle) != CS_ERR_OK) {
         fprintf(stderr, "could not open arm64 disassembler\n");
         return 1;
     }

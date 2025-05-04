@@ -58,6 +58,7 @@ struct qk_reloc_value {
     struct qk_inst* inst; // may be null if not a code offset
     struct qk_inst* sym_start;
     struct qk_inst* value;
+    size_t value_extra;
 };
 
 struct qk_reloc_other {
@@ -104,7 +105,9 @@ struct qk_rela {
 // Editable symbol.
 struct qk_sym {
     struct qk_inst* start;
+    size_t start_extra;
     struct qk_inst* end;
+    size_t end_extra;
     size_t index;
     struct qk_code* code;
 };
